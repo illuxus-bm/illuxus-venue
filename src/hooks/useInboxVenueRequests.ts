@@ -5,18 +5,17 @@ import { useVendorAuth } from "@/contexts/VendorAuthContext";
 
 /**
  * A row in the vendor Inbox that represents an organizer directly picking
- * this vendor from the main app's venue marketplace. Backed by
- * `event_venue_selections` (created in migration 027, RLS-fixed in
- * migration 031). Distinct from an RFQ: the organizer already committed
- * to a specific vendor, we just need Accept / Decline.
+ * one of this vendor's venues from the main app's marketplace. Backed by
+ * `event_venue_selections`. Distinct from an RFQ: the organizer already
+ * committed to a specific venue, we just need Accept / Decline.
+ *
+ * Read through the `vendor_venue_requests()` RPC (migration 109), not a
+ * direct `events!inner` join: events RLS hides DRAFT events from anyone
+ * but their owner, and Quick Create saves every new event as a draft, so
+ * the direct join silently dropped most requests.
  *
  * Segmentation into New / Responded / Expired lives in the tab component
  * (mirrors InboxRfq) so we only round-trip once.
- *
- * Column note: `event_venue_selections` uses `created_at` for the moment
- * the organizer picked the vendor (there is NO `contacted_at` column —
- * an earlier draft of this hook referenced one and every query errored
- * out with 42703, silently draining the Inbox).
  */
 export type VenueRequestStatus =
   | "contacted"
@@ -27,12 +26,12 @@ export type VenueRequestStatus =
 export interface InboxVenueRequestService {
   id: string;
   title: string;
+  category: string | null;
 }
 
 /** Venue-booking brief the organizer filled in on step 2 of Quick Create.
  *  Every field is optional / boolean-with-default; the vendor UI hides
- *  rows that are unset so old requests predating migration 035 render
- *  identically to how they used to. */
+ *  rows that are unset. */
 export interface InboxVenueRequestBrief {
   event_type: string | null;
   event_duration_hours: number | null;
@@ -49,48 +48,39 @@ export interface InboxVenueRequest extends InboxVenueRequestBrief {
   selection_id: string;
   event_id: string;
   event_title: string | null;
+  event_description: string | null;
   event_date: string | null;
+  event_end_date: string | null;
+  event_timezone: string | null;
+  /** events.location — city or full address typed by the organizer. */
   event_city: string | null;
   event_venue: string | null;
   event_capacity: number | null;
+  event_format: string | null;
+  event_banner_url: string | null;
+  /** Which of this vendor's venues was requested (null on legacy rows). */
+  venue_id: string | null;
+  venue_name: string | null;
+  org_name: string | null;
+  organizer_name: string | null;
+  organizer_email: string | null;
+  organizer_phone: string | null;
   notes: string | null;
   status: VenueRequestStatus;
-  /** When the organizer picked this vendor. Sourced from
-   *  `event_venue_selections.created_at`. */
+  /** When the organizer picked this venue. */
   created_at: string;
   responded_at: string | null;
-  /** Services the organizer ticked in the picker. Resolved to full
-   *  {id, title} pairs via a second query — ids the organizer selected
-   *  but the vendor has since deleted are dropped. Persisted in
-   *  `event_venue_selections.selected_service_ids` (migration 032). */
+  /** Services the organizer ticked in the picker. Ids the vendor has
+   *  since deleted are dropped. */
   requested_services: InboxVenueRequestService[];
 }
 
-interface RawRow {
-  id: string;
-  event_id: string;
-  notes: string | null;
-  status: VenueRequestStatus;
-  created_at: string;
-  responded_at: string | null;
+type RpcRow = Omit<InboxVenueRequest, "event_city" | "requested_services"> & {
+  vendor_id: string;
+  event_location: string | null;
+  event_status: string | null;
   selected_service_ids: string[] | null;
-  event_type: string | null;
-  event_duration_hours: number | null;
-  expected_attendees: number | null;
-  seating_capacity: number | null;
-  seating_arrangement: string | null;
-  needs_pre_function_area: boolean | null;
-  needs_vip_area: boolean | null;
-  needs_additional_rooms: boolean | null;
-  venue_link: string | null;
-  events: {
-    title: string | null;
-    date: string | null;
-    location: string | null;
-    venue: string | null;
-    capacity: number | null;
-  } | null;
-}
+};
 
 export function useInboxVenueRequests() {
   const { vendor } = useVendorAuth();
@@ -99,117 +89,39 @@ export function useInboxVenueRequests() {
     enabled: !!vendor?.id,
     queryKey: ["vendor-inbox-venues", vendor?.id],
     queryFn: async () => {
-      // event_venue_selections rows this vendor was picked for, joined to
-      // the parent event for date / city / title / capacity. `events!inner`
-      // means an accidentally orphan selection (parent event deleted) is
-      // dropped instead of surfacing an empty card.
-      const { data, error } = await (supabase as unknown as {
-        from: (t: string) => {
-          select: (s: string) => {
-            eq: (
-              c: string,
-              v: string,
-            ) => {
-              order: (
-                c: string,
-                o: { ascending: boolean },
-              ) => Promise<{ data: RawRow[] | null; error: Error | null }>;
-            };
-          };
-        };
-      })
-        .from("event_venue_selections")
-        .select(
-          `id, event_id, notes, status, created_at, responded_at,
-           selected_service_ids,
-           event_type, event_duration_hours, expected_attendees,
-           seating_capacity, seating_arrangement,
-           needs_pre_function_area, needs_vip_area, needs_additional_rooms,
-           venue_link,
-           events!inner ( title, date, location, venue, capacity )`,
-        )
-        .eq("vendor_id", vendor!.id)
-        .order("created_at", { ascending: false });
-
+      const { data, error } = await (supabase as any).rpc("vendor_venue_requests");
       if (error) throw error;
-      const rows = data ?? [];
-
-      // Collect every service id referenced across all rows into one
-      // batch fetch — avoids an N+1 when the vendor has multiple pending
-      // requests. RLS on vendor_services is public-read (migration 100)
-      // so this works even for non-owner viewers, but we scope by
-      // vendor_id anyway to keep the response tight.
-      const allServiceIds = Array.from(
-        new Set(
-          rows.flatMap((r) => r.selected_service_ids ?? []),
-        ),
+      const rows = ((data ?? []) as RpcRow[]).filter(
+        (r) => r.vendor_id === vendor!.id,
       );
 
-      const serviceTitleById = new Map<string, string>();
+      // One batch fetch for every service referenced across all rows.
+      const allServiceIds = Array.from(
+        new Set(rows.flatMap((r) => r.selected_service_ids ?? [])),
+      );
+      const serviceById = new Map<string, InboxVenueRequestService>();
       if (allServiceIds.length > 0) {
-        const { data: services } = await (
-          supabase as unknown as {
-            from: (t: string) => {
-              select: (s: string) => {
-                in: (
-                  c: string,
-                  ids: string[],
-                ) => {
-                  eq: (
-                    c: string,
-                    v: string,
-                  ) => Promise<{
-                    data: Array<{ id: string; title: string }> | null;
-                  }>;
-                };
-              };
-            };
-          }
-        )
+        const { data: services } = await (supabase as any)
           .from("vendor_services")
-          .select("id, title")
+          .select("id, title, category")
           .in("id", allServiceIds)
           .eq("vendor_id", vendor!.id);
-
-        for (const s of services ?? []) {
-          serviceTitleById.set(s.id, s.title);
+        for (const s of (services ?? []) as InboxVenueRequestService[]) {
+          serviceById.set(s.id, s);
         }
       }
 
-      return rows.map((row) => ({
-        selection_id: row.id,
-        event_id: row.event_id,
-        event_title: row.events?.title ?? null,
-        event_date: row.events?.date ?? null,
-        // The main app's event form separates a machine-friendly `venue`
-        // (e.g. "The Grand Ballroom") from a broader `location` (city or
-        // full address). Surface both so the vendor knows *where*.
-        event_city: row.events?.location ?? null,
-        event_venue: row.events?.venue ?? null,
-        event_capacity: row.events?.capacity ?? null,
-        notes: row.notes,
-        status: row.status,
-        created_at: row.created_at,
-        responded_at: row.responded_at,
-        requested_services: (row.selected_service_ids ?? [])
-          .map((id) => {
-            const title = serviceTitleById.get(id);
-            return title ? { id, title } : null;
-          })
-          .filter((s): s is InboxVenueRequestService => s !== null),
-        // Brief fields — migration 035. Nullable-boolean columns are
-        // coerced to strict booleans so consumers can trust them without
-        // an `?? false` at every read.
-        event_type: row.event_type,
-        event_duration_hours: row.event_duration_hours,
-        expected_attendees: row.expected_attendees,
-        seating_capacity: row.seating_capacity,
-        seating_arrangement: row.seating_arrangement,
-        needs_pre_function_area: row.needs_pre_function_area ?? false,
-        needs_vip_area: row.needs_vip_area ?? false,
-        needs_additional_rooms: row.needs_additional_rooms ?? false,
-        venue_link: row.venue_link,
-      }));
+      return rows.map<InboxVenueRequest>(
+        ({ vendor_id: _v, event_location, event_status: _s, selected_service_ids, ...row }) => ({
+          ...row,
+          event_city: event_location,
+          event_duration_hours:
+            row.event_duration_hours == null ? null : Number(row.event_duration_hours),
+          requested_services: (selected_service_ids ?? [])
+            .map((id) => serviceById.get(id))
+            .filter((s): s is InboxVenueRequestService => !!s),
+        }),
+      );
     },
   });
 }

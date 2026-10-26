@@ -18,6 +18,7 @@ import {
   type InboxVenueRequest,
 } from "@/hooks/useInboxVenueRequests";
 import { VenueBriefSummary } from "@/components/vendor/VenueBriefSummary";
+import { VenueRequestDetails } from "@/components/vendor/VenueRequestDetails";
 import { formatMoneyCents } from "@/lib/utils";
 
 type Filter = "new" | "responded" | "expired";
@@ -285,8 +286,10 @@ function VenueRequestRow({ request }: { request: InboxVenueRequest }) {
 
   // Both Accept and Decline UPDATE the same row. Migration 031's BEFORE
   // trigger stamps `responded_at` on any status → (accepted|declined)
-  // transition, so we don't need to set it client-side. The AFTER trigger
-  // then dispatches notify-organizer-venue-response via pg_net.
+  // transition, so we don't need to set it client-side. The organizer is
+  // emailed by notify-organizer-venue-response, which we call directly
+  // below as well as via the AFTER trigger; the function de-duplicates
+  // (migration 109), so the organizer gets one email either way.
   const setStatus = async (next: "accepted" | "declined") => {
     if (!vendor) return;
     const verb = next === "accepted" ? "Accept" : "Decline";
@@ -311,7 +314,18 @@ function VenueRequestRow({ request }: { request: InboxVenueRequest }) {
       qc.invalidateQueries({ queryKey: ["vendor-inbox-venues", vendor.id] });
       qc.invalidateQueries({ queryKey: ["vendor-stats", vendor.id] });
       qc.invalidateQueries({ queryKey: ["vendor-availability", vendor.id] });
-      toast.success(next === "accepted" ? "Venue request accepted" : "Declined");
+
+      const { data: mail, error: mailErr } = await supabase.functions.invoke(
+        "notify-organizer-venue-response",
+        { body: { selection_id: request.selection_id, status: next } },
+      );
+      const emailed = !mailErr && (mail as { ok?: boolean } | null)?.ok !== false;
+      const label = next === "accepted" ? "Venue request accepted" : "Request declined";
+      if (emailed) {
+        toast.success(`${label} — organizer notified by email`);
+      } else {
+        toast.warning(`${label}, but the email to the organizer failed to send.`);
+      }
     } finally {
       setBusy(false);
     }
@@ -363,8 +377,11 @@ function VenueRequestRow({ request }: { request: InboxVenueRequest }) {
           <p className="mt-2 truncate text-sm font-medium text-foreground">
             {request.event_title || "(untitled event)"}
           </p>
+
+          <VenueRequestDetails request={request} />
           {request.notes ? (
-            <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+            <p className="mt-3 rounded-md bg-muted/40 px-3 py-2 text-[12px] text-foreground whitespace-pre-line">
+              <span className="font-medium">Note: </span>
               {request.notes}
             </p>
           ) : null}
@@ -395,23 +412,6 @@ function VenueRequestRow({ request }: { request: InboxVenueRequest }) {
               old requests keep rendering cleanly. */}
           <VenueBriefSummary request={request} />
 
-          <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-            {request.event_city ? (
-              <span className="inline-flex items-center gap-1">
-                <MapPin className="h-3 w-3" />
-                {request.event_city}
-              </span>
-            ) : null}
-            {request.event_date ? (
-              <span>{new Date(request.event_date).toLocaleDateString()}</span>
-            ) : null}
-            {request.event_capacity ? (
-              <span className="inline-flex items-center gap-1">
-                <Users className="h-3 w-3" />
-                {request.event_capacity} capacity
-              </span>
-            ) : null}
-          </div>
         </div>
 
         {canAct ? (
