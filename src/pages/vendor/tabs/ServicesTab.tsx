@@ -7,7 +7,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ServiceEditorDialog } from "@/components/vendor/ServiceEditorDialog";
-import { useMyServices, type MyService } from "@/hooks/useMyServices";
+import {
+  serviceCategoryLabel,
+  useMyServices,
+  type MyService,
+} from "@/hooks/useMyServices";
+import { useMyVenues } from "@/hooks/useMyVenues";
 import { formatMoneyCents } from "@/lib/utils";
 
 /**
@@ -22,6 +27,11 @@ import { formatMoneyCents } from "@/lib/utils";
  */
 export default function ServicesTab() {
   const { data: services = [], isLoading, error } = useMyServices();
+  const { data: venues = [] } = useMyVenues();
+  const venueNames = React.useMemo(
+    () => new Map(venues.map((v) => [v.id, v.name])),
+    [venues],
+  );
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<MyService | null>(null);
 
@@ -61,7 +71,12 @@ export default function ServicesTab() {
       ) : (
         <div className="space-y-3">
           {services.map((s) => (
-            <ServiceRow key={s.id} s={s} onEdit={() => openEdit(s)} />
+            <ServiceRow
+              key={s.id}
+              s={s}
+              venueName={s.venue_id ? venueNames.get(s.venue_id) ?? "One venue" : "All venues"}
+              onEdit={() => openEdit(s)}
+            />
           ))}
         </div>
       )}
@@ -77,11 +92,14 @@ export default function ServicesTab() {
 
 function ServiceRow({
   s,
+  venueName,
   onEdit,
 }: {
   s: MyService;
+  venueName: string;
   onEdit: () => void;
 }) {
+  const category = serviceCategoryLabel(s.category);
   return (
     <Card
       className="group cursor-pointer transition-colors hover:border-foreground/20"
@@ -99,6 +117,8 @@ function ServiceRow({
                 Instant
               </Badge>
             ) : null}
+            {category ? <Badge variant="secondary">{category}</Badge> : null}
+            <Badge variant="outline">{venueName}</Badge>
             {!s.is_active ? <Badge variant="outline">Hidden</Badge> : null}
             {s.quote_on_request ? (
               <Badge variant="outline">Quotes accepted</Badge>

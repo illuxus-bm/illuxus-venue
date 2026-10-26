@@ -26,6 +26,7 @@ export type VenueMediaKind =
   | "setup"
   | "facility"
   | "floor_plan"
+  | "video"
   | "other";
 
 export interface Venue {
@@ -36,6 +37,13 @@ export interface Venue {
   space_type: string | null;
   description: string | null;
   is_active: boolean;
+
+  // ─ Location (migration 108) — the main app filters by `city` ─
+  address_line: string | null;
+  city: string | null;
+  state: string | null;
+  pincode: string | null;
+  map_url: string | null;
 
   area_sqft: number | null;
   length_ft: number | null;
@@ -279,6 +287,9 @@ function normaliseDraft(d: VenueDraft): Record<string, unknown> {
   // A name of null slipped through would trip the NOT NULL constraint;
   // surface that as a client-side error instead of a Postgres 23502.
   if (!out.name) throw new Error("Venue name is required.");
+  // City drives the organizer-side location filter — a venue without one
+  // would never match an event's location.
+  if (!out.city) throw new Error("City is required so organizers in that city can find the venue.");
   return out;
 }
 
@@ -287,6 +298,12 @@ export const EMPTY_VENUE_DRAFT: VenueDraft = {
   space_type: null,
   description: null,
   is_active: true,
+
+  address_line: null,
+  city: null,
+  state: null,
+  pincode: null,
+  map_url: null,
 
   area_sqft: null,
   length_ft: null,

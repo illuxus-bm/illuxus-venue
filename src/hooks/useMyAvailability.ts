@@ -12,6 +12,8 @@ export interface BlockedDate {
   status: AvailabilityStatus;
   note: string | null;
   booking_id: string | null;
+  /** Null = the whole business is blocked (migration 108). */
+  venue_id: string | null;
 }
 
 /** Every non-`available` row for this vendor, sorted by date. */
@@ -24,7 +26,7 @@ export function useMyAvailability() {
     queryFn: async () => {
       const { data, error } = await (supabase as any)
         .from("vendor_availability")
-        .select("id, vendor_id, date, status, note, booking_id")
+        .select("id, vendor_id, date, status, note, booking_id, venue_id")
         .eq("vendor_id", vendor!.id)
         .in("status", ["held", "booked"])
         .order("date", { ascending: true });
@@ -40,7 +42,7 @@ export function useBlockDate() {
   const { vendor } = useVendorAuth();
 
   return useMutation({
-    mutationFn: async (args: { date: string; note?: string }) => {
+    mutationFn: async (args: { date: string; note?: string; venueId?: string | null }) => {
       if (!vendor?.id) throw new Error("no vendor");
       const { error } = await (supabase as any)
         .from("vendor_availability")
@@ -49,6 +51,7 @@ export function useBlockDate() {
           date: args.date,
           note: args.note || null,
           status: "held",
+          venue_id: args.venueId || null,
         });
       if (error) throw error;
     },

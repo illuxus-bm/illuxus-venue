@@ -22,7 +22,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn } from "@/lib/utils";
-import type { MyService } from "@/hooks/useMyServices";
+import { SERVICE_CATEGORIES, type MyService } from "@/hooks/useMyServices";
+import { useMyVenues } from "@/hooks/useMyVenues";
 
 const CURRENCIES = ["USD", "INR", "EUR", "GBP", "AUD", "CAD", "SGD", "AED"] as const;
 const UNITS = [
@@ -45,6 +46,9 @@ const schema = z.object({
   is_instant_book: z.boolean(),
   quote_on_request: z.boolean(),
   is_active: z.boolean(),
+  category: z.string().max(40).optional().or(z.literal("")),
+  // "" = every venue; otherwise a venues.id owned by this vendor.
+  venue_id: z.string().optional().or(z.literal("")),
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -54,6 +58,8 @@ interface ServiceEditorDialogProps {
   onOpenChange: (open: boolean) => void;
   /** Existing service to edit. Pass `null` (or omit) to add a new one. */
   service?: MyService | null;
+  /** Pre-selects "Offered at" when adding from a venue's Services dialog. */
+  defaultVenueId?: string | null;
 }
 
 /**
@@ -65,8 +71,10 @@ export function ServiceEditorDialog({
   open,
   onOpenChange,
   service,
+  defaultVenueId,
 }: ServiceEditorDialogProps) {
   const { vendor } = useVendorAuth();
+  const { data: venues = [] } = useMyVenues();
   const qc = useQueryClient();
   const isEdit = !!service;
   const [saving, setSaving] = React.useState(false);
@@ -81,15 +89,15 @@ export function ServiceEditorDialog({
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: buildDefaults(service ?? null, vendor?.default_currency),
+    defaultValues: buildDefaults(service ?? null, vendor?.default_currency, defaultVenueId),
   });
 
   // Reset the form whenever the dialog opens with a different service.
   React.useEffect(() => {
     if (open) {
-      reset(buildDefaults(service ?? null, vendor?.default_currency));
+      reset(buildDefaults(service ?? null, vendor?.default_currency, defaultVenueId));
     }
-  }, [open, service, vendor?.default_currency, reset]);
+  }, [open, service, vendor?.default_currency, defaultVenueId, reset]);
 
   const currency = watch("currency");
   const unit = watch("unit");
@@ -112,6 +120,8 @@ export function ServiceEditorDialog({
         is_instant_book: values.is_instant_book,
         quote_on_request: values.quote_on_request,
         is_active: values.is_active,
+        category: values.category || null,
+        venue_id: values.venue_id || null,
       };
 
       let error;
@@ -184,6 +194,46 @@ export function ServiceEditorDialog({
               {...register("title")}
             />
           </Field>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Category" htmlFor="category">
+              <select
+                id="category"
+                className={cn(
+                  "flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                )}
+                {...register("category")}
+              >
+                <option value="">Uncategorised</option>
+                {SERVICE_CATEGORIES.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <Field
+              label="Offered at"
+              htmlFor="venue_id"
+              hint="Organizers see this add-on only on the chosen venue."
+            >
+              <select
+                id="venue_id"
+                className={cn(
+                  "flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                )}
+                {...register("venue_id")}
+              >
+                <option value="">All my venues</option>
+                {venues.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
 
           <Field
             label="Description"
@@ -376,6 +426,7 @@ function Field({
 function buildDefaults(
   service: MyService | null,
   vendorDefaultCurrency?: string,
+  defaultVenueId?: string | null,
 ): FormValues {
   const fallbackCurrency = (vendorDefaultCurrency ??
     "USD") as (typeof CURRENCIES)[number];
@@ -391,6 +442,8 @@ function buildDefaults(
     is_instant_book: service?.is_instant_book ?? false,
     quote_on_request: service?.quote_on_request ?? true,
     is_active: service?.is_active ?? true,
+    category: service?.category ?? "",
+    venue_id: service ? (service.venue_id ?? "") : (defaultVenueId ?? ""),
   };
 }
 

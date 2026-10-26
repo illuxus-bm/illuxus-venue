@@ -2,6 +2,8 @@ import * as React from "react";
 import {
   Building2,
   EyeOff,
+  MapPin,
+  Sparkles,
   ImageIcon,
   MoreHorizontal,
   Pencil,
@@ -25,6 +27,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 import { VenueEditorDialog } from "@/components/vendor/VenueEditorDialog";
 import { VenueMediaManager } from "@/components/vendor/VenueMediaManager";
+import { VenueServicesDialog } from "@/components/vendor/VenueServicesDialog";
 import {
   useDeleteVenue,
   useMyVenues,
@@ -47,6 +50,7 @@ export default function VenuesTab() {
   const { data: venues = [], isLoading, error } = useMyVenues();
   const [editorFor, setEditorFor] = React.useState<Venue | "new" | null>(null);
   const [mediaFor, setMediaFor] = React.useState<Venue | null>(null);
+  const [servicesFor, setServicesFor] = React.useState<Venue | null>(null);
 
   if (isLoading) {
     return (
@@ -86,6 +90,7 @@ export default function VenuesTab() {
               venue={v}
               onEdit={() => setEditorFor(v)}
               onManageMedia={() => setMediaFor(v)}
+              onManageServices={() => setServicesFor(v)}
             />
           ))}
         </div>
@@ -111,6 +116,17 @@ export default function VenuesTab() {
           venueName={mediaFor.name}
         />
       )}
+
+      {/* Additional services (photography, food, …) for one venue. */}
+      {servicesFor && (
+        <VenueServicesDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setServicesFor(null);
+          }}
+          venue={servicesFor}
+        />
+      )}
     </div>
   );
 }
@@ -121,10 +137,12 @@ function VenueRow({
   venue,
   onEdit,
   onManageMedia,
+  onManageServices,
 }: {
   venue: Venue;
   onEdit: () => void;
   onManageMedia: () => void;
+  onManageServices: () => void;
 }) {
   const toggleActive = useToggleVenueActive();
   const del = useDeleteVenue();
@@ -165,6 +183,17 @@ function VenueRow({
             </p>
           )}
           <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+            {venue.city ? (
+              <span className="inline-flex items-center gap-1">
+                <MapPin className="h-3 w-3" />
+                {venue.city}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-amber-700">
+                <MapPin className="h-3 w-3" />
+                Add a city so organizers in that city can find it
+              </span>
+            )}
             {venue.area_sqft ? <span>{venue.area_sqft.toLocaleString()} sq ft</span> : null}
             {largestCapacity ? (
               <span className="inline-flex items-center gap-1">
@@ -178,7 +207,7 @@ function VenueRow({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <Button variant="outline" size="sm" onClick={onEdit}>
             <Pencil className="h-3.5 w-3.5 mr-1.5" />
             Edit
@@ -186,6 +215,10 @@ function VenueRow({
           <Button variant="outline" size="sm" onClick={onManageMedia}>
             <ImageIcon className="h-3.5 w-3.5 mr-1.5" />
             Media
+          </Button>
+          <Button variant="outline" size="sm" onClick={onManageServices}>
+            <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+            Services
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

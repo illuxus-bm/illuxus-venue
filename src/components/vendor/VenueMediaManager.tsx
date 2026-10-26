@@ -47,10 +47,14 @@ const KIND_OPTIONS: Array<{ value: VenueMediaKind; label: string; hint: string }
   { value: "setup",      label: "Setup",         hint: "The space fully decorated" },
   { value: "facility",   label: "Facility",      hint: "Entrance, changing rooms, dining" },
   { value: "floor_plan", label: "Floor plan",    hint: "2D layout, exits, plug points" },
+  { value: "video",      label: "Video",         hint: "Walkthrough or event highlights" },
   { value: "other",      label: "Other",         hint: "Anything else worth showing" },
 ];
 
 const STORAGE_BUCKET = "venue-media";
+// Mirrors the bucket's file_size_limit (migration 108) so an oversized
+// video fails fast instead of after a long upload.
+const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
 export function VenueMediaManager({
   open,
@@ -83,6 +87,7 @@ export function VenueMediaManager({
       setup: [],
       facility: [],
       floor_plan: [],
+      video: [],
       other: [],
     };
     for (const m of media) buckets[m.media_kind].push(m);
@@ -118,6 +123,12 @@ export function VenueMediaManager({
     for (let i = 0; i < list.length; i++) {
       const file = list[i];
       try {
+        if (file.size > MAX_FILE_BYTES) {
+          toast.error(`${file.name}: larger than 50 MB`);
+          failures += 1;
+          continue;
+        }
+        const isVideo = file.type.startsWith("video/");
         const ext = file.name.split(".").pop()?.toLowerCase() ?? "bin";
         // Path shape: `<venue_id>/<uuid>.<ext>`. Keeps files grouped per
         // venue for easy inspection in the Storage dashboard and matches
@@ -141,11 +152,12 @@ export function VenueMediaManager({
           .from(STORAGE_BUCKET)
           .getPublicUrl(objectName);
 
-        const shouldCover = !alreadyHasCover;
+        // Videos never become the cover — marketplace cards render it as <img>.
+        const shouldCover = !alreadyHasCover && !isVideo;
         await addMedia.mutateAsync({
           venue_id: venueId,
           url: publicUrl.publicUrl,
-          media_kind: pendingKind,
+          media_kind: isVideo ? "video" : pendingKind,
           caption: caption.trim() || undefined,
           is_cover: shouldCover,
         });
@@ -212,8 +224,8 @@ export function VenueMediaManager({
         <DialogHeader className="px-6 pt-6 pb-4 border-b border-border">
           <DialogTitle>Media · {venueName}</DialogTitle>
           <DialogDescription>
-            Upload empty-hall shots, setup examples, facility photos, and a
-            floor plan. Marketplace cards use the marked cover photo; detail
+            Upload empty-hall shots, setup examples, facility photos, videos,
+            and a floor plan. Marketplace cards use the marked cover photo; detail
             views show every image.
           </DialogDescription>
         </DialogHeader>
@@ -257,7 +269,7 @@ export function VenueMediaManager({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*,application/pdf"
+              accept="image/*,application/pdf,video/mp4,video/webm,video/quicktime"
               multiple
               disabled={uploading}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -279,7 +291,8 @@ export function VenueMediaManager({
           <p className="text-[11px] text-muted-foreground">
             Pick multiple files at once — every file in the batch is saved
             with the same kind and caption. PDF works for floor plans;
-            images are recommended for hall / setup / facility.
+            images are recommended for hall / setup / facility. Videos
+            (MP4, WebM, MOV — up to 50 MB) are filed under Video automatically.
           </p>
         </div>
 
@@ -306,7 +319,14 @@ export function VenueMediaManager({
                       className="rounded-md border border-border overflow-hidden bg-card group"
                     >
                       <div className="aspect-square bg-muted/40 relative">
-                        {isImageUrl(m.url) ? (
+                        {isVideoUrl(m.url) ? (
+                          <video
+                            src={m.url}
+                            controls
+                            preload="metadata"
+                            className="h-full w-full object-cover bg-black"
+                          />
+                        ) : isImageUrl(m.url) ? (
                           <img
                             src={m.url}
                             alt={m.caption ?? o.label}
@@ -340,6 +360,7 @@ export function VenueMediaManager({
                             variant="ghost"
                             size="sm"
                             className="h-6 px-1.5 text-[11px]"
+                            disabled={isVideoUrl(m.url)}
                             onClick={() => toggleCover(m.id, !m.is_cover)}
                             aria-label={m.is_cover ? "Remove cover" : "Set as cover"}
                           >
@@ -383,6 +404,10 @@ export function VenueMediaManager({
       </DialogContent>
     </Dialog>
   );
+}
+
+function isVideoUrl(url: string): boolean {
+  return /\.(mp4|webm|mov)(\?|$)/i.test(url);
 }
 
 function isImageUrl(url: string): boolean {

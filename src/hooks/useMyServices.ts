@@ -10,6 +10,29 @@ export type ServiceUnit =
   | "per_day"
   | "flat";
 
+/** Add-on categories a venue can offer. Stored as free text in
+ *  vendor_services.category (migration 108) so the list can grow without
+ *  a migration; the main app shows the label next to each add-on. */
+export const SERVICE_CATEGORIES = [
+  { value: "photography",   label: "Photography" },
+  { value: "videography",   label: "Videography" },
+  { value: "food",          label: "Food & catering" },
+  { value: "meals",         label: "Breakfast / lunch / dinner" },
+  { value: "beverages",     label: "Beverages & bar" },
+  { value: "decor",         label: "Decor & florals" },
+  { value: "av",            label: "Sound, light & AV" },
+  { value: "entertainment", label: "Entertainment" },
+  { value: "accommodation", label: "Rooms & accommodation" },
+  { value: "transport",     label: "Transport & parking" },
+  { value: "staffing",      label: "Staff & hospitality" },
+  { value: "other",         label: "Other" },
+] as const;
+
+export function serviceCategoryLabel(value: string | null | undefined): string | null {
+  if (!value) return null;
+  return SERVICE_CATEGORIES.find((c) => c.value === value)?.label ?? value;
+}
+
 export interface MyService {
   id: string;
   title: string;
@@ -22,6 +45,9 @@ export interface MyService {
   is_instant_book: boolean;
   quote_on_request: boolean;
   is_active: boolean;
+  /** Null = offered at every venue of this vendor. */
+  venue_id: string | null;
+  category: string | null;
 }
 
 export function useMyServices() {
@@ -34,7 +60,7 @@ export function useMyServices() {
       const { data, error } = await (supabase as any)
         .from("vendor_services")
         .select(
-          "id, title, description, base_price, currency, unit, duration, is_instant_book, quote_on_request, is_active",
+          "id, title, description, base_price, currency, unit, duration, is_instant_book, quote_on_request, is_active, venue_id, category",
         )
         .eq("vendor_id", vendor!.id)
         .order("created_at", { ascending: true });

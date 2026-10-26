@@ -13,6 +13,7 @@ import {
   useMyAvailability,
   useUnblockDate,
 } from "@/hooks/useMyAvailability";
+import { useMyVenues } from "@/hooks/useMyVenues";
 
 /**
  * Availability — vendor holds unbookable dates so the marketplace hides them
@@ -27,6 +28,13 @@ import {
 export default function AvailabilityTab() {
   const [date, setDate] = React.useState("");
   const [note, setNote] = React.useState("");
+  // "" = block every venue (whole business).
+  const [venueId, setVenueId] = React.useState("");
+  const { data: venues = [] } = useMyVenues();
+  const venueNames = React.useMemo(
+    () => new Map(venues.map((v) => [v.id, v.name])),
+    [venues],
+  );
   const { data: blocks = [], isLoading } = useMyAvailability();
   const blockDate = useBlockDate();
   const unblockDate = useUnblockDate();
@@ -38,7 +46,7 @@ export default function AvailabilityTab() {
       return;
     }
     try {
-      await blockDate.mutateAsync({ date, note });
+      await blockDate.mutateAsync({ date, note, venueId });
       setDate("");
       setNote("");
       toast.success("Date blocked");
@@ -56,7 +64,7 @@ export default function AvailabilityTab() {
         <CardContent>
           <form
             onSubmit={submit}
-            className="grid grid-cols-1 gap-4 sm:grid-cols-[180px_1fr_auto] sm:items-end"
+            className="grid grid-cols-1 gap-4 sm:grid-cols-[180px_180px_1fr_auto] sm:items-end"
           >
             <div className="space-y-2">
               <Label htmlFor="block-date">Date</Label>
@@ -66,6 +74,22 @@ export default function AvailabilityTab() {
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="block-venue">Venue</Label>
+              <select
+                id="block-venue"
+                value={venueId}
+                onChange={(e) => setVenueId(e.target.value)}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">All venues</option>
+                {venues.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="block-note">Reason (optional)</Label>
@@ -100,7 +124,12 @@ export default function AvailabilityTab() {
                   <div className="flex items-center gap-3">
                     <CalendarX className="h-4 w-4 text-muted-foreground" />
                     <div>
-                      <div className="num font-medium text-foreground">{b.date}</div>
+                      <div className="num font-medium text-foreground">
+                        {b.date}
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          {b.venue_id ? venueNames.get(b.venue_id) ?? "One venue" : "All venues"}
+                        </span>
+                      </div>
                       <div className="text-xs text-muted-foreground">
                         {b.note ??
                           (b.status === "booked" ? "Confirmed booking" : "Blocked")}

@@ -111,7 +111,7 @@ export function VenueEditorDialog({
     setDraft((d) => ({ ...d, [key]: value }));
 
   const handleSave = async () => {
-    if (!draft.name.trim()) return;
+    if (!draft.name.trim() || !draft.city?.trim()) return;
     try {
       await save.mutateAsync({ id: venue?.id, draft });
       onOpenChange(false);
@@ -179,9 +179,49 @@ export function VenueEditorDialog({
               </div>
             </FieldSet>
 
-            {/* ─── Section 2: Dimensions ─── */}
+            {/* ─── Section 2: Location ─── */}
             <FieldSet
-              title="2 · Dimensions & physical space"
+              title="2 · Location"
+              hint="Organizers only see venues in the city of their event, so the city must match how people write it (e.g. Mumbai, Delhi, Bengaluru)."
+            >
+              <TextField
+                label="Address"
+                value={draft.address_line ?? ""}
+                onChange={(v) => set("address_line", v)}
+                placeholder="Plot 12, Linking Road, Bandra West"
+              />
+              <div className="grid gap-3 sm:grid-cols-3">
+                <TextField
+                  label="City"
+                  value={draft.city ?? ""}
+                  onChange={(v) => set("city", v)}
+                  placeholder="Mumbai"
+                  required
+                />
+                <TextField
+                  label="State"
+                  value={draft.state ?? ""}
+                  onChange={(v) => set("state", v)}
+                  placeholder="Maharashtra"
+                />
+                <TextField
+                  label="Pincode"
+                  value={draft.pincode ?? ""}
+                  onChange={(v) => set("pincode", v)}
+                  placeholder="400050"
+                />
+              </div>
+              <TextField
+                label="Google Maps link"
+                value={draft.map_url ?? ""}
+                onChange={(v) => set("map_url", v)}
+                placeholder="https://maps.app.goo.gl/…"
+              />
+            </FieldSet>
+
+            {/* ─── Section 3: Dimensions ─── */}
+            <FieldSet
+              title="3 · Dimensions & physical space"
               hint="Helps decorators plan lighting, drapes, and stage layouts."
             >
               <div className="grid gap-3 sm:grid-cols-2">
@@ -213,9 +253,9 @@ export function VenueEditorDialog({
               </div>
             </FieldSet>
 
-            {/* ─── Section 3: Capacity by arrangement ─── */}
+            {/* ─── Section 4: Capacity by arrangement ─── */}
             <FieldSet
-              title="3 · Seating capacity by arrangement"
+              title="4 · Seating capacity by arrangement"
               hint="Maximum guest count comfortable for each layout. Leave blank if the layout doesn't apply to this space."
             >
               <div className="grid gap-3 sm:grid-cols-2">
@@ -247,9 +287,9 @@ export function VenueEditorDialog({
               </div>
             </FieldSet>
 
-            {/* ─── Section 4: Amenities ─── */}
+            {/* ─── Section 5: Amenities ─── */}
             <FieldSet
-              title="4 · Amenities & facilities"
+              title="5 · Amenities & facilities"
               hint="What comes bundled with the venue rental."
             >
               <div className="grid gap-3 sm:grid-cols-2">
@@ -296,9 +336,9 @@ export function VenueEditorDialog({
               </div>
             </FieldSet>
 
-            {/* ─── Section 5: Policies ─── */}
+            {/* ─── Section 6: Policies ─── */}
             <FieldSet
-              title="5 · Policies & vendor rules"
+              title="6 · Policies & vendor rules"
               hint="What the organizer can and can't bring in."
             >
               <div className="grid gap-3 sm:grid-cols-2">
@@ -344,8 +384,8 @@ export function VenueEditorDialog({
               />
             </FieldSet>
 
-            {/* ─── Section 6: Logistics ─── */}
-            <FieldSet title="6 · Logistics & accessibility">
+            {/* ─── Section 7: Logistics ─── */}
+            <FieldSet title="7 · Logistics & accessibility">
               <div className="grid gap-3 sm:grid-cols-2">
                 <NumberField
                   label="Parking (cars)"
@@ -365,19 +405,20 @@ export function VenueEditorDialog({
               </div>
             </FieldSet>
 
-            {/* ─── Section 7: Media placeholder ─── */}
+            {/* ─── Section 8: Media + services placeholder ─── */}
             <FieldSet
-              title="7 · Media & visuals"
-              hint="Photos and floor plans are managed on the Venues tab after Save. Add empty-hall shots, setup examples, facility photos, and a floor plan."
+              title="8 · Media & additional services"
+              hint="Photos, videos and floor plans, plus the add-on services this venue offers (photography, food, lunch, decor…), are managed from the venue card after Save."
             >
               {venue ? (
                 <p className="text-[12px] text-muted-foreground">
-                  Close this dialog and use the Media menu on the venue card
-                  to upload photos and a floor plan.
+                  Close this dialog and use the Media and Services buttons on
+                  the venue card.
                 </p>
               ) : (
                 <p className="text-[12px] text-muted-foreground">
-                  Save this venue first, then add media from the Venues tab.
+                  Save this venue first, then add media and services from the
+                  Venues tab.
                 </p>
               )}
             </FieldSet>
@@ -394,7 +435,7 @@ export function VenueEditorDialog({
           </Button>
           <Button
             onClick={handleSave}
-            disabled={!draft.name.trim() || save.isPending}
+            disabled={!draft.name.trim() || !draft.city?.trim() || save.isPending}
           >
             {save.isPending && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
             {venue ? "Save changes" : "Add venue"}
