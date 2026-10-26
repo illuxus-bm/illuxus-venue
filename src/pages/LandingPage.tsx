@@ -22,6 +22,7 @@ import {
 import { IlluxusWordmark } from "@/components/brand/IlluxusWordmark";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { PillLink, PosterTitle, Reveal, SectionChip, SiteContainer } from "@/components/landing/primitives";
+import { VenueIllustration } from "@/components/landing/VenueIllustration";
 import "@/components/landing/landing.css";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
 import { usePublicVenues, type PublicVenue } from "@/hooks/usePublicVenues";
@@ -176,7 +177,8 @@ function LandingHeader({ planUrl }: { planUrl: string }) {
 /* ────────────────────────────────────────────────────────────────────── */
 
 function Hero({ venues, planUrl }: { venues: PublicVenue[]; planUrl: string }) {
-  const featured = venues.find((v) => v.cover_url) ?? venues[0] ?? null;
+  // The card shows a drawn hall; the listing only supplies its caption.
+  const featured = venues[0] ?? null;
 
   return (
     <section className="relative overflow-hidden pb-20 pt-32 sm:pt-40 lg:pb-28">
@@ -219,20 +221,16 @@ function HeroShowcase({ venue }: { venue: PublicVenue | null }) {
   const tags = [
     { label: "Free on your dates", className: "-left-4 top-8 sm:-left-10", delay: "0s" },
     { label: "In your city", className: "-right-2 top-1/3 sm:-right-8", delay: "-2s" },
-    // Kept over the photo: lower down it would cover the venue name.
+    // Kept over the picture: lower down it would cover the venue name.
     { label: "Add-on services", className: "-left-2 top-[52%] sm:-left-8", delay: "-4s" },
   ];
   return (
     <div className="relative mx-auto w-full max-w-[460px]">
       <div className="relative -rotate-2 overflow-hidden rounded-[22px] border border-border bg-card shadow-[0_40px_80px_-40px_rgba(3,14,26,0.6)]">
+        {/* Drawn hall, not the venue's uploaded cover: uploads can be anything
+            (screenshots, floor plans) and the hero needs art-directed imagery. */}
         <div className="relative aspect-[4/3] bg-muted">
-          {venue?.cover_url ? (
-            <img src={venue.cover_url} alt={venue.name} className="h-full w-full object-cover" />
-          ) : (
-            <div className="grid h-full w-full place-items-center bg-gradient-to-br from-primary/15 via-transparent to-accent/15">
-              <Building2 className="h-14 w-14 text-primary/60" strokeWidth={1.5} />
-            </div>
-          )}
+          <VenueIllustration className="h-full w-full" />
         </div>
         <div className="flex items-end justify-between gap-4 p-5">
           <div className="min-w-0">
