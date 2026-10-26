@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 
 export interface PublicVenue {
   id: string;
+  vendor_id: string;
   name: string;
   description: string | null;
   space_type: string | null;
@@ -21,6 +22,7 @@ export interface PublicVenue {
 
 interface VenueRow {
   id: string;
+  vendor_id: string;
   name: string;
   description: string | null;
   space_type: string | null;
@@ -41,7 +43,7 @@ export function usePublicVenues() {
       const { data, error } = await (supabase as any)
         .from("venues")
         .select(
-          "id, name, description, space_type, city, area_sqft, capacity_floating, capacity_theater, capacity_banquet, capacity_ushape, capacity_classroom",
+          "id, vendor_id, name, description, space_type, city, area_sqft, capacity_floating, capacity_theater, capacity_banquet, capacity_ushape, capacity_classroom",
         )
         .eq("is_active", true)
         .order("created_at", { ascending: true });
@@ -74,6 +76,7 @@ export function usePublicVenues() {
         ].filter((n): n is number => typeof n === "number" && n > 0);
         return {
           id: r.id,
+          vendor_id: r.vendor_id,
           name: r.name,
           description: r.description,
           space_type: r.space_type,

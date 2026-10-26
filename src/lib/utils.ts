@@ -46,3 +46,19 @@ export function illuxusOrigin(): string {
   if (configured && typeof configured === "string") return configured;
   return "https://illuxus.com";
 }
+
+/** Where organizers book a venue: venue booking lives inside illuxus. */
+export function planEventUrl(): string {
+  return `${illuxusOrigin().replace(/\/$/, "")}/dashboard/events/new`;
+}
+
+/** "Biz Millennium" → "BM": up to two initials for logo placeholders. */
+export function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}

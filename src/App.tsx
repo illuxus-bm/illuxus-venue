@@ -10,6 +10,8 @@ import VendorLoginPage from "@/pages/vendor/VendorLoginPage";
 import VendorSignupPage from "@/pages/vendor/VendorSignupPage";
 import VendorDashboardPage from "@/pages/vendor/VendorDashboardPage";
 import LandingPage from "@/pages/LandingPage";
+import PublicProfilePage from "@/pages/public/PublicProfilePage";
+import PublicVenuePage from "@/pages/public/PublicVenuePage";
 import NotFound from "@/pages/NotFound";
 
 // Tuned for a supplier dashboard: keep 30s of freshness so quickly
@@ -51,6 +53,10 @@ export default function App() {
 
             {/* Public landing page; the venue admin reaches the dashboard from its header. */}
             <Route path="/" element={<LandingPage />} />
+
+            {/* Public pages: a venue business's profile and each listed venue. */}
+            <Route path="/v/:vendorId" element={<PublicProfilePage />} />
+            <Route path="/venues/:venueId" element={<PublicVenuePage />} />
 
             {/* Fallback */}
             <Route path="*" element={<NotFound />} />

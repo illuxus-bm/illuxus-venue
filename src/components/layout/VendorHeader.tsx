@@ -96,15 +96,12 @@ export function VendorHeader() {
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={() =>
-                    toast.info(
-                      "Public profile pages ship with the organizer marketplace.",
-                    )
-                  }
-                >
-                  <User className="h-4 w-4" />
-                  View public profile
+                <DropdownMenuItem asChild>
+                  {/* New tab so the dashboard stays open behind it. */}
+                  <a href={`/v/${vendor.id}`} target="_blank" rel="noreferrer">
+                    <User className="h-4 w-4" />
+                    View public profile
+                  </a>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem

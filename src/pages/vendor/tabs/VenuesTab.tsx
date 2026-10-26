@@ -1,6 +1,7 @@
 import * as React from "react";
 import {
   Building2,
+  ExternalLink,
   EyeOff,
   MapPin,
   Sparkles,
@@ -232,6 +233,15 @@ function VenueRow({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-52">
+              {/* Hidden venues aren't publicly readable, so there's no page to open. */}
+              {venue.is_active ? (
+                <DropdownMenuItem asChild>
+                  <a href={`/venues/${venue.id}`} target="_blank" rel="noreferrer">
+                    <ExternalLink className="h-4 w-4 mr-2" />
+                    View public page
+                  </a>
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem
                 onClick={() =>
                   toggleActive.mutate({
