@@ -1,8 +1,9 @@
 import type { Config } from "tailwindcss";
 import tailwindcssAnimate from "tailwindcss-animate";
 
-// Design tokens mirror illuxus so both apps feel like one product.
-// Every color goes through an HSL CSS variable declared in src/index.css.
+// Design tokens mirror illuxus (its tailwind.config.ts) so both apps feel
+// like one product. Every color goes through an HSL CSS variable declared
+// in src/index.css.
 export default {
   darkMode: ["class"],
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
@@ -51,6 +52,30 @@ export default {
           foreground: "hsl(var(--card-foreground))",
         },
         success: "hsl(var(--success))",
+        highlight: "hsl(var(--highlight))",
+        spot: {
+          DEFAULT: "hsl(var(--spot))",
+          foreground: "hsl(var(--spot-foreground))",
+        },
+      },
+      // As in illuxus: as text, primary and accent use their "ink" values,
+      // tuned per theme for contrast. Fills keep the base colour.
+      textColor: {
+        primary: {
+          DEFAULT: "hsl(var(--primary-ink))",
+          foreground: "hsl(var(--primary-foreground))",
+        },
+        accent: {
+          DEFAULT: "hsl(var(--accent-ink))",
+          foreground: "hsl(var(--accent-foreground))",
+        },
+      },
+      fontFamily: {
+        poster: ["var(--font-poster)"],
+      },
+      boxShadow: {
+        float: "var(--float-shadow)",
+        pop: "var(--pop-shadow)",
       },
       borderRadius: {
         lg: "var(--radius)",

@@ -1,5 +1,7 @@
 import { Link } from "react-router-dom";
-import { Store } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { IlluxusWordmark } from "@/components/brand/IlluxusWordmark";
+import { illuxusOrigin } from "@/lib/utils";
 
 interface AuthShellProps {
   children: React.ReactNode;
@@ -17,19 +19,21 @@ export function AuthShell({ children, footer }: AuthShellProps) {
     <div className="flex min-h-screen flex-col bg-background">
       <header className="border-b border-border/60">
         <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-6">
-          <Link
-            to="/"
-            className="flex items-center gap-2 text-sm font-semibold text-foreground"
-          >
-            <Store className="h-4 w-4" />
-            Vendor Connect
+          <Link to="/" className="flex items-center gap-2.5" aria-label="Illuxus Venues home">
+            <IlluxusWordmark height={20} ariaLabel="" />
+            <span className="eyebrow rounded-full border border-border bg-card px-2.5 py-1 text-[10px] text-primary">
+              Venues
+            </span>
           </Link>
-          <a
-            href="https://illuxus.com"
-            className="text-xs text-muted-foreground hover:text-foreground"
-          >
-            illuxus
-          </a>
+          <div className="flex items-center gap-3">
+            <ThemeToggle />
+            <a
+              href={illuxusOrigin()}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              illuxus.com
+            </a>
+          </div>
         </div>
       </header>
 

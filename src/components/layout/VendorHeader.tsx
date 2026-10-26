@@ -1,4 +1,5 @@
-import { ChevronDown, LogOut, Store, User } from "lucide-react";
+import { ChevronDown, LogOut, User } from "lucide-react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -12,12 +13,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { StarRating } from "@/components/StarRating";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { IlluxusWordmark } from "@/components/brand/IlluxusWordmark";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
 
 /**
  * Sticky top bar for the vendor dashboard.
  *
- *   [ Vendor Connect ]          [ ★ 0.0 (0)  |  Avatar ▾ ]
+ *   [ illuxus VENUES ]   [ ★ 0.0 (0)  |  ☀/☾  |  Avatar ▾ ]
  *
  * The avatar opens a proper user menu with business identity, email, and
  * a Sign out action — the previous single icon-button had no affordance
@@ -42,13 +45,16 @@ export function VendorHeader() {
   return (
     <header className="sticky top-0 z-30 border-b border-border/60 bg-background/95 backdrop-blur">
       <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
-        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-          <Store className="h-4 w-4" />
-          Vendor Connect
-        </div>
+        <Link to="/" className="flex items-center gap-2.5" aria-label="Illuxus Venues home">
+          <IlluxusWordmark height={20} ariaLabel="" />
+          <span className="eyebrow rounded-full border border-border bg-card px-2.5 py-1 text-[10px] text-primary">
+            Venues
+          </span>
+        </Link>
 
         {vendor ? (
           <div className="flex items-center gap-3">
+            <ThemeToggle />
             <StarRating
               value={vendor.rating_avg ?? 0}
               count={vendor.rating_count ?? 0}

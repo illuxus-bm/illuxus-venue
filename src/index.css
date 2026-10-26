@@ -2,74 +2,101 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Design tokens are copied from illuxus (src/index.css) so the venue portal
+   reads as the same product: violet identity, amber accent, Onest for the UI
+   and Bebas Neue for poster headlines, in light and dark. When the main
+   app's palette changes, update both files. */
+
 @layer base {
   :root {
-    /* Canvas — clean white with near-black ink, matches illuxus so both
-       apps feel like one product. */
-    --background: 0 0% 100%;
-    --foreground: 222 25% 10%;
+    --float-shadow: 0 1px 2px hsl(0 0% 0% / 0.05), 0 12px 28px -14px hsl(0 0% 0% / 0.3);
+    --pop-shadow: 0 2px 6px hsl(0 0% 0% / 0.06), 0 24px 48px -20px hsl(0 0% 0% / 0.28);
+
+    --font-sans: 'Onest', 'Poppins', system-ui, -apple-system, 'Segoe UI', sans-serif;
+    --font-poster: 'Bebas Neue', 'Oswald', 'Arial Narrow', Impact, sans-serif;
+
+    /* Light: #FAFAFA canvas, #FFFFFF surfaces, #111827 text, #7E22CE violet,
+       #D97706 amber. */
+    --background: 0 0% 98%;
+    --foreground: 221 39% 11%;
 
     --card: 0 0% 100%;
-    --card-foreground: 222 25% 10%;
+    --card-foreground: 221 39% 11%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 222 25% 10%;
+    --popover-foreground: 221 39% 11%;
 
-    /* Primary CTAs use ink-on-canvas — the same "black button" look you
-       see in the vendor screenshots ("+ Block", "Save profile"). */
-    --primary: 222 25% 10%;
+    /* `--primary-ink` is the violet as text, tuned per theme for contrast;
+       fills (`bg-primary`) keep the base value. */
+    --primary: 272 72% 47%;
     --primary-foreground: 0 0% 100%;
+    --primary-ink: 272 72% 47%;
 
-    --secondary: 220 14% 96%;
-    --secondary-foreground: 222 25% 10%;
+    --secondary: 240 5% 96%;
+    --secondary-foreground: 221 39% 11%;
 
-    --muted: 220 14% 96%;
+    --muted: 240 5% 96%;
     --muted-foreground: 220 9% 46%;
 
-    /* Accent = vivid blue (used on links and the "Complete profile" arrow). */
-    --accent: 220 95% 56%;
-    --accent-foreground: 0 0% 100%;
+    /* Amber accent. `--highlight` colours the emphasised words in poster
+       headlines. */
+    --accent: 32 95% 44%;
+    --accent-foreground: 221 39% 11%;
+    --accent-ink: 26 90% 37%;
+    --highlight: 272 72% 47%;
+    --spot: 32 95% 44%;
+    --spot-foreground: 221 39% 11%;
     --success: 142 72% 42%;
 
     --destructive: 0 90% 58%;
     --destructive-foreground: 0 0% 100%;
 
     --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 220 95% 56%;
+    --input: 220 13% 88%;
+    --ring: 272 72% 47%;
 
     --radius: 0.75rem;
   }
 
   .dark {
-    --background: 224 16% 7%;
-    --foreground: 0 0% 98%;
+    --float-shadow: 0 1px 2px hsl(0 0% 0% / 0.4), 0 12px 28px -14px hsl(0 0% 0% / 0.9);
+    --pop-shadow: 0 2px 6px hsl(0 0% 0% / 0.45), 0 24px 48px -20px hsl(0 0% 0% / 0.95);
 
-    --card: 224 14% 10%;
-    --card-foreground: 0 0% 98%;
+    /* Dark: #121212 canvas, #1E1E1E surfaces, #E5E7EB text, #9333EA violet,
+       #F59E0B amber. */
+    --background: 0 0% 7%;
+    --foreground: 220 13% 91%;
 
-    --popover: 224 14% 10%;
-    --popover-foreground: 0 0% 98%;
+    --card: 0 0% 12%;
+    --card-foreground: 220 13% 91%;
 
-    --primary: 0 0% 98%;
-    --primary-foreground: 224 16% 7%;
+    --popover: 0 0% 12%;
+    --popover-foreground: 220 13% 91%;
 
-    --secondary: 224 12% 14%;
-    --secondary-foreground: 0 0% 98%;
+    --primary: 271 81% 56%;
+    --primary-foreground: 0 0% 100%;
+    --primary-ink: 270 95% 75%;
 
-    --muted: 224 12% 14%;
-    --muted-foreground: 220 8% 62%;
+    --secondary: 0 0% 16%;
+    --secondary-foreground: 220 13% 91%;
 
-    --accent: 220 95% 62%;
-    --accent-foreground: 0 0% 100%;
+    --muted: 0 0% 16%;
+    --muted-foreground: 218 11% 65%;
+
+    --accent: 38 92% 50%;
+    --accent-foreground: 0 0% 7%;
+    --accent-ink: 38 92% 50%;
+    --highlight: 270 95% 75%;
+    --spot: 38 92% 50%;
+    --spot-foreground: 0 0% 7%;
     --success: 142 70% 50%;
 
     --destructive: 0 80% 58%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 224 10% 18%;
-    --input: 224 10% 18%;
-    --ring: 220 95% 62%;
+    --border: 0 0% 19%;
+    --input: 0 0% 22%;
+    --ring: 271 81% 56%;
   }
 }
 
@@ -85,7 +112,7 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: "Poppins", system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -97,7 +124,7 @@
   textarea,
   select,
   button {
-    font-family: "Poppins", system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
   }
 
   h1,
@@ -106,7 +133,7 @@
   h4,
   h5,
   h6 {
-    font-family: "Poppins", system-ui, sans-serif;
+    font-family: var(--font-sans);
     letter-spacing: -0.025em;
     font-weight: 700;
     color: hsl(var(--foreground));
@@ -120,14 +147,27 @@
     font-feature-settings: "tnum";
   }
 
-  /* Eyebrow labels — uppercase, wide tracking, small size. Matches
-     "OPEN REQUESTS", "PENDING QUOTES", etc. from the Overview KPIs. */
+  /* Wide-tracked uppercase label, as in illuxus. Colour comes from the
+     surrounding text, so pair it with a text-* class. */
   .eyebrow {
-    font-family: "Poppins", system-ui, sans-serif;
-    font-weight: 600;
+    font-family: var(--font-sans);
+    font-weight: 700;
     letter-spacing: 0.16em;
     text-transform: uppercase;
-    font-size: 0.72rem;
-    color: hsl(var(--muted-foreground));
+    font-size: 0.75rem;
   }
+}
+
+/* Floating header chips, as in the illuxus header (AppHeaderBar). */
+.float-chip {
+  background: hsl(var(--card) / 0.92);
+  border: 1px solid hsl(var(--border));
+  box-shadow: var(--float-shadow);
+}
+.float-chip[data-active="true"],
+.float-chip[data-active="true"]:hover,
+.float-chip-solid {
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
 }

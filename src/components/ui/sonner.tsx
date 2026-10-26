@@ -1,5 +1,7 @@
 import { Toaster as Sonner } from "sonner";
 
+import { useTheme } from "@/contexts/ThemeContext";
+
 type ToasterProps = React.ComponentProps<typeof Sonner>;
 
 /**
@@ -7,9 +9,10 @@ type ToasterProps = React.ComponentProps<typeof Sonner>;
  * tokens without needing to re-theme it at every call site.
  */
 export function Toaster(props: ToasterProps) {
+  const { theme } = useTheme();
   return (
     <Sonner
-      theme="light"
+      theme={theme}
       className="toaster group"
       toastOptions={{
         classNames: {

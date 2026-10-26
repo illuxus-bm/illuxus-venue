@@ -235,7 +235,7 @@ function KpiTile({
     <Card>
       <CardContent className="flex flex-col gap-2 p-4">
         <div className="flex items-start justify-between">
-          <span className="eyebrow">{label}</span>
+          <span className="eyebrow text-muted-foreground">{label}</span>
           <Icon className="h-3.5 w-3.5 text-muted-foreground" />
         </div>
         <div className="num text-3xl font-semibold tracking-tight text-foreground">
