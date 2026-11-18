@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Illuxus Venues</string>
+    <string name="title_activity_main">Illuxus Venues</string>
+    <string name="package_name">com.illuxus.venues</string>
+    <string name="custom_url_scheme">com.illuxus.venues</string>
+</resources>
