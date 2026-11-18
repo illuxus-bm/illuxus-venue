@@ -17,7 +17,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { VendorHeader } from "@/components/layout/VendorHeader";
 import { VendorFooter } from "@/components/layout/VendorFooter";
 import { EnvMissingBanner } from "@/components/EnvMissingBanner";
-import { useVendorRealtime } from "@/hooks/useVendorRealtime";
 import OverviewTab from "@/pages/vendor/tabs/OverviewTab";
 import InboxTab from "@/pages/vendor/tabs/InboxTab";
 import QuotesTab from "@/pages/vendor/tabs/QuotesTab";
@@ -75,7 +74,9 @@ export default function VendorDashboardPage() {
     },
     [setParams],
   );
-  useVendorRealtime();
+  // No realtime channel: the inbox and KPI queries poll while the page is
+  // visible, every query refetches on focus, and the native shells
+  // invalidate everything on resume (see NativeBridge).
 
   return (
     <div className="flex min-h-screen flex-col bg-background">

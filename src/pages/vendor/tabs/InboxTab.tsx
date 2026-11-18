@@ -11,7 +11,7 @@ import { ErrorState, EmptyState } from "@/components/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SendQuoteDialog } from "@/components/vendor/SendQuoteDialog";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { post, seg } from "@/lib/api";
 import { useInboxRfqs, type InboxRfq } from "@/hooks/useInboxRfqs";
 import {
   useInboxVenueRequests,
@@ -182,7 +182,7 @@ function RfqRow({
   const canAct = !rfq.declined && rfq.status === "open" && !rfq.responded_at;
 
   const decline = async () => {
-    if (!vendor) return;
+    if (!vendor || declining) return;
     if (
       !window.confirm(
         "Decline this request? The organizer will see you're not available.",
@@ -191,18 +191,12 @@ function RfqRow({
       return;
     setDeclining(true);
     try {
-      const { error } = await (supabase as any)
-        .from("rfq_invitees")
-        .update({ declined: true, responded_at: new Date().toISOString() })
-        .eq("rfq_id", rfq.rfq_id)
-        .eq("vendor_id", vendor.id);
-      if (error) {
-        toast.error(error.message ?? "Could not decline");
-        return;
-      }
+      await post(`/me/inbox/rfqs/${seg(rfq.rfq_id)}/decline`);
       qc.invalidateQueries({ queryKey: ["vendor-inbox", vendor.id] });
       qc.invalidateQueries({ queryKey: ["vendor-stats", vendor.id] });
       toast.success("Declined");
+    } catch (err) {
+      toast.error((err as Error).message || "Could not decline");
     } finally {
       setDeclining(false);
     }
@@ -291,14 +285,11 @@ function VenueRequestRow({ request }: { request: InboxVenueRequest }) {
 
   const canAct = request.status === "contacted";
 
-  // Both Accept and Decline UPDATE the same row. Migration 031's BEFORE
-  // trigger stamps `responded_at` on any status → (accepted|declined)
-  // transition, so we don't need to set it client-side. The organizer is
-  // emailed by notify-organizer-venue-response, which we call directly
-  // below as well as via the AFTER trigger; the function de-duplicates
-  // (migration 109), so the organizer gets one email either way.
+  // Accept / Decline go through one endpoint; the server stamps
+  // responded_at, blocks (or not) the date and emails the organizer, and
+  // reports whether that email went out.
   const setStatus = async (next: "accepted" | "declined") => {
-    if (!vendor) return;
+    if (!vendor || busy) return;
     const verb = next === "accepted" ? "Accept" : "Decline";
     if (
       !window.confirm(
@@ -310,29 +301,22 @@ function VenueRequestRow({ request }: { request: InboxVenueRequest }) {
       return;
     setBusy(true);
     try {
-      const { error } = await (supabase as any)
-        .from("event_venue_selections")
-        .update({ status: next })
-        .eq("id", request.selection_id);
-      if (error) {
-        toast.error(error.message ?? `Could not ${verb.toLowerCase()}`);
-        return;
-      }
+      const { emailed } = await post<{ status: string; emailed: boolean }>(
+        `/me/inbox/venue-requests/${seg(request.selection_id)}/respond`,
+        { status: next },
+      );
       qc.invalidateQueries({ queryKey: ["vendor-inbox-venues", vendor.id] });
       qc.invalidateQueries({ queryKey: ["vendor-stats", vendor.id] });
       qc.invalidateQueries({ queryKey: ["vendor-availability", vendor.id] });
 
-      const { data: mail, error: mailErr } = await supabase.functions.invoke(
-        "notify-organizer-venue-response",
-        { body: { selection_id: request.selection_id, status: next } },
-      );
-      const emailed = !mailErr && (mail as { ok?: boolean } | null)?.ok !== false;
       const label = next === "accepted" ? "Venue request accepted" : "Request declined";
       if (emailed) {
         toast.success(`${label} — organizer notified by email`);
       } else {
         toast.warning(`${label}, but the email to the organizer failed to send.`);
       }
+    } catch (err) {
+      toast.error((err as Error).message || `Could not ${verb.toLowerCase()}`);
     } finally {
       setBusy(false);
     }

@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { supabase } from "@/integrations/supabase/client";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
+import { del, get, patch, post, seg } from "@/lib/api";
 
 /**
- * CRUD + read hooks for the vendor's venues (migration 106).
+ * CRUD + read hooks for the vendor's venues (/api/me/venues).
  *
  * Every write invalidates both `vendor-venues` (this tab) and
  * `venue-media-<venueId>` so the media grid re-renders after a name /
@@ -109,15 +109,7 @@ export function useMyVenues() {
   return useQuery<Venue[]>({
     enabled: !!vendor?.id,
     queryKey: ["vendor-venues", vendor?.id],
-    queryFn: async () => {
-      const { data, error } = await (supabase as any)
-        .from("venues")
-        .select("*")
-        .eq("vendor_id", vendor!.id)
-        .order("created_at", { ascending: true });
-      if (error) throw error;
-      return (data ?? []) as Venue[];
-    },
+    queryFn: ({ signal }) => get<Venue[]>("/me/venues", { signal }),
   });
 }
 
@@ -125,17 +117,8 @@ export function useVenueMedia(venueId: string | null | undefined) {
   return useQuery<VenueMedia[]>({
     enabled: !!venueId,
     queryKey: ["venue-media", venueId],
-    queryFn: async () => {
-      const { data, error } = await (supabase as any)
-        .from("venue_media")
-        .select("*")
-        .eq("venue_id", venueId!)
-        .order("is_cover", { ascending: false })
-        .order("sort_order", { ascending: true })
-        .order("created_at", { ascending: true });
-      if (error) throw error;
-      return (data ?? []) as VenueMedia[];
-    },
+    // Server order: cover first, then sort_order, created_at.
+    queryFn: ({ signal }) => get<VenueMedia[]>(`/me/venues/${seg(venueId!)}/media`, { signal }),
   });
 }
 
@@ -150,29 +133,13 @@ export function useSaveVenue() {
     mutationFn: async ({ id, draft }) => {
       if (!vendor?.id) throw new Error("Not signed in as a vendor.");
 
-      // The DB requires a name and enforces enum-shaped columns via CHECK
-      // constraints. Client-side we coerce empty strings to null so the
-      // constraints see "unspecified" instead of a zero-length text.
+      // Client-side we coerce empty strings to null so the server sees
+      // "unspecified" instead of a zero-length text.
       const payload = normaliseDraft(draft);
 
-      if (id) {
-        const { data, error } = await (supabase as any)
-          .from("venues")
-          .update(payload)
-          .eq("id", id)
-          .select()
-          .single();
-        if (error) throw error;
-        return data as Venue;
-      } else {
-        const { data, error } = await (supabase as any)
-          .from("venues")
-          .insert({ ...payload, vendor_id: vendor.id })
-          .select()
-          .single();
-        if (error) throw error;
-        return data as Venue;
-      }
+      return id
+        ? patch<Venue>(`/me/venues/${seg(id)}`, payload)
+        : post<Venue>("/me/venues", payload);
     },
     onSuccess: (v, vars) => {
       qc.invalidateQueries({ queryKey: ["vendor-venues", vendor?.id] });
@@ -181,7 +148,7 @@ export function useSaveVenue() {
       }
       toast.success(vars.id ? "Venue updated" : `Venue "${v.name}" added`);
     },
-    onError: (err) => toast.error(err.message ?? "Could not save venue"),
+    onError: (err) => toast.error(err.message || "Could not save venue"),
   });
 }
 
@@ -189,19 +156,16 @@ export function useDeleteVenue() {
   const { vendor } = useVendorAuth();
   const qc = useQueryClient();
   return useMutation<void, Error, { id: string; name: string }>({
-    mutationFn: async ({ id }) => {
-      const { error } = await (supabase as any).from("venues").delete().eq("id", id);
-      if (error) throw error;
-    },
+    mutationFn: ({ id }) => del(`/me/venues/${seg(id)}`),
     onSuccess: (_v, vars) => {
       qc.invalidateQueries({ queryKey: ["vendor-venues", vendor?.id] });
       qc.invalidateQueries({ queryKey: ["venue-media", vars.id] });
-      // venues ON DELETE CASCADE removes its services and calendar blocks.
+      // Deleting a venue cascades to its services and calendar blocks.
       qc.invalidateQueries({ queryKey: ["vendor-services", vendor?.id] });
       qc.invalidateQueries({ queryKey: ["vendor-availability", vendor?.id] });
       toast.success(`Deleted "${vars.name}"`);
     },
-    onError: (err) => toast.error(err.message ?? "Could not delete venue"),
+    onError: (err) => toast.error(err.message || "Could not delete venue"),
   });
 }
 
@@ -210,17 +174,13 @@ export function useToggleVenueActive() {
   const qc = useQueryClient();
   return useMutation<void, Error, { id: string; nextActive: boolean }>({
     mutationFn: async ({ id, nextActive }) => {
-      const { error } = await (supabase as any)
-        .from("venues")
-        .update({ is_active: nextActive })
-        .eq("id", id);
-      if (error) throw error;
+      await patch<Venue>(`/me/venues/${seg(id)}`, { is_active: nextActive });
     },
     onSuccess: (_v, vars) => {
       qc.invalidateQueries({ queryKey: ["vendor-venues", vendor?.id] });
       toast.success(vars.nextActive ? "Venue listed" : "Venue hidden from marketplace");
     },
-    onError: (err) => toast.error(err.message ?? "Could not update venue"),
+    onError: (err) => toast.error(err.message || "Could not update venue"),
   });
 }
 
@@ -233,45 +193,41 @@ export function useAddVenueMedia() {
   return useMutation<
     VenueMedia,
     Error,
-    { venue_id: string; url: string; caption?: string; media_kind: VenueMediaKind; is_cover?: boolean }
+    {
+      venue_id: string;
+      /** Storage key from POST /api/me/uploads (kind "venue-media"). */
+      key: string;
+      caption?: string;
+      media_kind: VenueMediaKind;
+      is_cover?: boolean;
+    }
   >({
-    mutationFn: async (input) => {
-      const { data, error } = await (supabase as any)
-        .from("venue_media")
-        .insert({
-          venue_id: input.venue_id,
-          url: input.url,
-          caption: input.caption ?? null,
-          media_kind: input.media_kind,
-          is_cover: input.is_cover ?? false,
-        })
-        .select()
-        .single();
-      if (error) throw error;
-      return data as VenueMedia;
-    },
+    mutationFn: (input) =>
+      post<VenueMedia>(`/me/venues/${seg(input.venue_id)}/media`, {
+        key: input.key,
+        media_kind: input.media_kind,
+        caption: input.caption,
+        is_cover: input.is_cover ?? false,
+      }),
     onSuccess: (_v, vars) => {
       qc.invalidateQueries({ queryKey: ["venue-media", vars.venue_id] });
       // Success toast is owned by the caller — batch uploads would
       // otherwise spawn one toast per file. Errors still toast here
       // because the caller may fire-and-forget.
     },
-    onError: (err) => toast.error(err.message ?? "Could not add media"),
+    onError: (err) => toast.error(err.message || "Could not add media"),
   });
 }
 
 export function useDeleteVenueMedia() {
   const qc = useQueryClient();
   return useMutation<void, Error, { id: string; venue_id: string }>({
-    mutationFn: async ({ id }) => {
-      const { error } = await (supabase as any).from("venue_media").delete().eq("id", id);
-      if (error) throw error;
-    },
+    mutationFn: ({ id }) => del(`/me/venue-media/${seg(id)}`),
     onSuccess: (_v, vars) => {
       qc.invalidateQueries({ queryKey: ["venue-media", vars.venue_id] });
       toast.success("Media removed");
     },
-    onError: (err) => toast.error(err.message ?? "Could not remove media"),
+    onError: (err) => toast.error(err.message || "Could not remove media"),
   });
 }
 
@@ -281,14 +237,13 @@ export function useDeleteVenueMedia() {
 
 function normaliseDraft(d: VenueDraft): Record<string, unknown> {
   const out: Record<string, unknown> = { ...d };
-  // Blank strings → null so CHECK(length(x) between 1..N) and enum checks
-  // don't fire on inputs the user just cleared.
+  // Blank strings → null so length and enum validation doesn't fire on
+  // inputs the user just cleared.
   for (const k of Object.keys(out)) {
     const v = out[k];
     if (typeof v === "string" && v.trim() === "") out[k] = null;
   }
-  // A name of null slipped through would trip the NOT NULL constraint;
-  // surface that as a client-side error instead of a Postgres 23502.
+  // The API requires a name; surface that client-side before a round-trip.
   if (!out.name) throw new Error("Venue name is required.");
   // City drives the organizer-side location filter — a venue without one
   // would never match an event's location.

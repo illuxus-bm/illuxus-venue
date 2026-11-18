@@ -22,9 +22,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ErrorState, EmptyState } from "@/components/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
-import { supabase } from "@/integrations/supabase/client";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
-import { useMyBookings, type MyBooking } from "@/hooks/useMyBookings";
+import {
+  updateBooking,
+  useMyBookings,
+  type BookingPatch,
+  type MyBooking,
+} from "@/hooks/useMyBookings";
 import {
   useInboxVenueRequests,
   type InboxVenueRequest,
@@ -231,25 +235,17 @@ function BookingRow({ b }: { b: MyBooking }) {
   const qc = useQueryClient();
   const [busy, setBusy] = React.useState(false);
 
-  const transition = async (
-    patch: Partial<MyBooking>,
-    successMsg: string,
-  ) => {
-    if (!vendor) return;
+  const transition = async (patch: BookingPatch, successMsg: string) => {
+    if (!vendor || busy) return;
     setBusy(true);
     try {
-      const { error } = await (supabase as any)
-        .from("vendor_bookings")
-        .update(patch)
-        .eq("id", b.id);
-      if (error) {
-        toast.error(error.message ?? "Could not update booking");
-        return;
-      }
+      await updateBooking(b.id, patch);
       qc.invalidateQueries({ queryKey: ["vendor-bookings", vendor.id] });
       qc.invalidateQueries({ queryKey: ["vendor-availability", vendor.id] });
       qc.invalidateQueries({ queryKey: ["vendor-stats", vendor.id] });
       toast.success(successMsg);
+    } catch (err) {
+      toast.error((err as Error).message || "Could not update booking");
     } finally {
       setBusy(false);
     }

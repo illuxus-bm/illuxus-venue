@@ -11,13 +11,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import { useVendorAuth } from "@/contexts/VendorAuthContext";
-import { supabase } from "@/integrations/supabase/client";
-import {
-  pathFromPublicUrl,
-  removeVendorObject,
-  uploadVendorImage,
-} from "@/lib/uploads";
+import { useVendorAuth, type Vendor } from "@/contexts/VendorAuthContext";
+import { patch, put } from "@/lib/api";
+import { uploadVendorImage, VENDOR_MEDIA_TYPES } from "@/lib/uploads";
 
 const DEFAULT_AUTO_REPLY =
   "Thanks for reaching out! I'll review your brief and respond within 24 hours.";
@@ -56,7 +52,7 @@ type FormValues = z.infer<typeof schema>;
  * Profile tab — the biggest form in the app.
  *
  * Sections (top to bottom):
- *   1. Cover & logo         — media uploads to vendor-media bucket
+ *   1. Cover & logo         — vendor-media uploads via the API
  *   2. Business details     — name, website, city, country, YoE, response time, tagline, bio
  *   3. Social links         — Instagram, LinkedIn, Facebook, YouTube (packed into socials jsonb)
  *   4. Preferences          — notify_email toggle + auto-reply textarea
@@ -99,7 +95,7 @@ export default function ProfileTab() {
       if (values.facebook_url) socials.facebook = values.facebook_url;
       if (values.youtube_url) socials.youtube = values.youtube_url;
 
-      const patch = {
+      const body = {
         business_name: values.business_name,
         website: normalize(values.website),
         city: normalize(values.city),
@@ -112,15 +108,11 @@ export default function ProfileTab() {
         notify_email: values.notify_email,
         auto_reply: normalize(values.auto_reply) ?? DEFAULT_AUTO_REPLY,
       };
-      const { error } = await supabase
-        .from("vendors")
-        .update(patch)
-        .eq("id", vendor.id);
-      if (error) throw error;
+      await patch<Vendor>("/me/vendor", body);
       await refreshVendor();
       toast.success("Profile saved");
     } catch (err: any) {
-      toast.error(err?.message ?? "Could not save profile");
+      toast.error(err?.message || "Could not save profile");
     } finally {
       setSaving(false);
     }
@@ -249,7 +241,7 @@ export default function ProfileTab() {
 }
 
 /* -------------------------------------------------------------------------- */
-/*  Cover + Logo — real uploads to the vendor-media bucket                   */
+/*  Cover + Logo — vendor-media uploads via POST /api/me/uploads              */
 /* -------------------------------------------------------------------------- */
 
 function CoverAndLogoCard() {
@@ -264,36 +256,22 @@ function CoverAndLogoCard() {
       toast.error("Vendor profile not loaded");
       return;
     }
+    const busy = kind === "logo" ? uploadingLogo : uploadingCover;
+    if (busy) return;
     const setBusy = kind === "logo" ? setUploadingLogo : setUploadingCover;
     setBusy(true);
     try {
-      const result = await uploadVendorImage(file, vendor.id, kind);
+      const result = await uploadVendorImage(file);
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
-
-      const column = kind === "logo" ? "logo_url" : "cover_url";
-      const previousUrl =
-        kind === "logo" ? vendor.logo_url : vendor.cover_url;
-
-      const { error } = await supabase
-        .from("vendors")
-        .update(column === "logo_url" ? { logo_url: result.url } : { cover_url: result.url })
-        .eq("id", vendor.id);
-      if (error) {
-        toast.error(error.message);
-        return;
-      }
-
-      // Best-effort cleanup of the previous file so orphans don't accumulate.
-      const oldPath = pathFromPublicUrl(previousUrl);
-      if (oldPath && oldPath !== result.path) {
-        void removeVendorObject(oldPath);
-      }
-
+      // The server swaps the URL and deletes the previous file.
+      await put<Vendor>("/me/vendor/image", { kind, key: result.key });
       await refreshVendor();
       toast.success(kind === "logo" ? "Logo updated" : "Cover updated");
+    } catch (err) {
+      toast.error((err as Error).message || "Could not update image");
     } finally {
       setBusy(false);
     }
@@ -322,14 +300,14 @@ function CoverAndLogoCard() {
         <input
           ref={coverInputRef}
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          accept={VENDOR_MEDIA_TYPES.join(",")}
           className="hidden"
           onChange={onCoverChange}
         />
         <input
           ref={logoInputRef}
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          accept={VENDOR_MEDIA_TYPES.join(",")}
           className="hidden"
           onChange={onLogoChange}
         />

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { supabase } from "@/integrations/supabase/client";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
+import { del, get, post, seg } from "@/lib/api";
 
 export type AvailabilityStatus = "available" | "held" | "booked";
 
@@ -16,27 +16,19 @@ export interface BlockedDate {
   venue_id: string | null;
 }
 
-/** Every non-`available` row for this vendor, sorted by date. */
+/** Every non-`available` row (held + booked) for this vendor, by date. */
 export function useMyAvailability() {
   const { vendor } = useVendorAuth();
 
   return useQuery<BlockedDate[]>({
     enabled: !!vendor?.id,
     queryKey: ["vendor-availability", vendor?.id],
-    queryFn: async () => {
-      const { data, error } = await (supabase as any)
-        .from("vendor_availability")
-        .select("id, vendor_id, date, status, note, booking_id, venue_id")
-        .eq("vendor_id", vendor!.id)
-        .in("status", ["held", "booked"])
-        .order("date", { ascending: true });
-      if (error) throw error;
-      return (data as BlockedDate[]) ?? [];
-    },
+    queryFn: ({ signal }) => get<BlockedDate[]>("/me/availability", { signal }),
   });
 }
 
-/** Manually block a date. Uses status='held' so it's distinguishable from auto-blocks. */
+/** Manually block a date. The server stores it as status='held' so it's
+ *  distinguishable from auto-blocks; 409 if the date is already blocked. */
 export function useBlockDate() {
   const qc = useQueryClient();
   const { vendor } = useVendorAuth();
@@ -44,16 +36,11 @@ export function useBlockDate() {
   return useMutation({
     mutationFn: async (args: { date: string; note?: string; venueId?: string | null }) => {
       if (!vendor?.id) throw new Error("no vendor");
-      const { error } = await (supabase as any)
-        .from("vendor_availability")
-        .insert({
-          vendor_id: vendor.id,
-          date: args.date,
-          note: args.note || null,
-          status: "held",
-          venue_id: args.venueId || null,
-        });
-      if (error) throw error;
+      await post<BlockedDate>("/me/availability", {
+        date: args.date,
+        note: args.note || undefined,
+        venue_id: args.venueId || undefined,
+      });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["vendor-availability", vendor?.id] });
@@ -68,14 +55,7 @@ export function useUnblockDate() {
   const { vendor } = useVendorAuth();
 
   return useMutation({
-    mutationFn: async (id: string) => {
-      const { error } = await (supabase as any)
-        .from("vendor_availability")
-        .delete()
-        .eq("id", id)
-        .eq("status", "held");
-      if (error) throw error;
-    },
+    mutationFn: (id: string) => del(`/me/availability/${seg(id)}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["vendor-availability", vendor?.id] });
     },

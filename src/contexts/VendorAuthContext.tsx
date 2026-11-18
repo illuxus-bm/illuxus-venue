@@ -1,113 +1,102 @@
 import * as React from "react";
-import type { Session, User } from "@supabase/supabase-js";
 
-import { supabase } from "@/integrations/supabase/client";
-import type { Database } from "@/integrations/supabase/types";
+import { ApiError, get } from "@/lib/api";
+import { auth, type AuthUser } from "@/lib/auth";
 import { reportError } from "@/lib/monitoring";
 
-type Vendor = Database["public"]["Tables"]["vendors"]["Row"];
+export type VerificationStatus =
+  | "unverified"
+  | "pending"
+  | "verified"
+  | "rejected";
+
+/** The caller's vendor business, as returned by GET /api/me. */
+export interface Vendor {
+  id: string;
+  business_name: string;
+  tagline: string | null;
+  bio: string | null;
+  website: string | null;
+  city: string | null;
+  country: string | null;
+  logo_url: string | null;
+  cover_url: string | null;
+  years_experience: number | null;
+  response_time_hours: number | null;
+  socials: Record<string, string> | null;
+  notify_email: boolean;
+  auto_reply: string | null;
+  default_currency: string;
+  rating_avg: number | null;
+  rating_count: number;
+  verification_status: VerificationStatus;
+  commission_rate: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MeResponse {
+  user: { id: string; email: string | null };
+  vendor: Vendor | null;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Email allowlist — vendor portal is invite-only.
 // ─────────────────────────────────────────────────────────────────────────────
-// The vendor portal shares its Supabase project with the main Illuxus app, so
-// anyone with an auth.users row could otherwise try to sign in here. We gate
-// every entry point (sign-in, sign-up, existing-account link) behind an
-// explicit email allowlist. The default list ships one address so the portal
-// works out of the box for the seed vendor; production deployments can
-// override with `VITE_VENDOR_ALLOWED_EMAILS` (comma-separated) without a
-// code change.
+// Anyone with an account in the shared auth backend could otherwise try to
+// sign in here, so sign-in is gated behind an explicit email allowlist. The
+// default list ships one address so the portal works out of the box for the
+// seed vendor; deployments override it with `VITE_VENDOR_ALLOWED_EMAILS`
+// (comma-separated) without a code change.
 //
-// This is a UX gate, not a security boundary. RLS on vendor_* tables is what
-// actually protects the data; a determined attacker with valid credentials
-// could hit the REST API directly. But that user still wouldn't have a
-// vendor_members row and would see nothing — the allowlist just shortens
-// the failure path and shows a clean message instead of the misleading
-// "This email isn't registered as a vendor" that we surface for members-
-// missing accounts.
-const DEFAULT_ALLOWLIST = ["aman@bizmillennium.com"];
-
+// This is a UX gate, not a security boundary: the API scopes every /me route
+// to the caller's vendor membership (403 not_a_vendor otherwise). The
+// allowlist just shortens the failure path and shows a clean message.
+// No built-in addresses: the server decides who is a vendor. Set the env
+// var only to show the "not authorized" message before a network round trip.
 const VENDOR_EMAIL_ALLOWLIST: ReadonlySet<string> = new Set(
-  (
-    (import.meta.env.VITE_VENDOR_ALLOWED_EMAILS as string | undefined) ??
-    DEFAULT_ALLOWLIST.join(",")
-  )
+  ((import.meta.env.VITE_VENDOR_ALLOWED_EMAILS as string | undefined) ?? "")
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter((s) => s.length > 0),
 );
 
 function isEmailAllowlisted(email: string): boolean {
-  // Empty allowlist === explicitly opt-out (falls back to the vendor_members
-  // check). Non-empty === strict allowlist.
+  // Empty allowlist === explicitly opt-out (falls back to the server's
+  // vendor-membership check). Non-empty === strict allowlist.
   if (VENDOR_EMAIL_ALLOWLIST.size === 0) return true;
   return VENDOR_EMAIL_ALLOWLIST.has(email.trim().toLowerCase());
 }
 
-const ALLOWLIST_REJECTION = new Error(
-  "This email isn't authorized to access the vendor portal. Contact support if you should have access.",
-);
+const ALLOWLIST_REJECTION_MESSAGE =
+  "This email isn't authorized to access the vendor portal. Contact support if you should have access.";
 
-interface SignUpResult {
-  error: Error | null;
-  /** True when Supabase returned no session — the user must click the
-   *  confirmation link in their inbox before signing in. */
-  needsConfirmation?: boolean;
-}
+const NOT_A_VENDOR_MESSAGE =
+  "This email isn't registered as a vendor. Sign up to create a vendor business.";
 
 interface VendorAuthState {
-  /** True until the first session probe finishes. */
+  /** True until the persisted session has been restored. */
   loading: boolean;
-  /** True while we're fetching (or refetching) the vendor row. */
+  /** True while we're fetching (or refetching, non-silently) the vendor. */
   vendorLoading: boolean;
-  session: Session | null;
-  user: User | null;
+  user: AuthUser | null;
   vendor: Vendor | null;
-  /** Set when loading the vendor row failed for a reason other than "no
+  /** Set when loading the vendor failed for a reason other than "no
    *  membership" (network, 5xx). The gate shows a retry instead of the
    *  misleading "not authorized" screen. */
   vendorError: Error | null;
   /**
-   * Signs the user in with email + password and enforces vendor-membership.
-   * If Supabase reports "Email not confirmed", surfaces a clear message so
-   * the login page can tell the user to check their inbox.
+   * Signs the user in with email + password and enforces vendor membership
+   * (GET /api/me must return a vendor). If the auth backend reports "Email
+   * not confirmed", surfaces a clear message so the login page can tell the
+   * user to check their inbox.
    */
   signIn: (
     email: string,
     password: string,
   ) => Promise<{ error: Error | null }>;
-  /**
-   * Creates the auth user, stashes `business_name` in raw_user_meta_data,
-   * and Supabase sends a confirmation email using the project's SMTP.
-   *
-   * The corresponding vendors + vendor_members rows are created later by
-   * the on_vendor_email_confirmed() DB trigger, the moment the user clicks
-   * the link. Nothing to do client-side after this call.
-   */
-  signUp: (
-    email: string,
-    password: string,
-    businessName: string,
-  ) => Promise<SignUpResult>;
-  /** Resend the "confirm signup" email if the user lost the first one. */
-  resendConfirmation: (email: string) => Promise<{ error: Error | null }>;
-  /**
-   * "Existing Illuxus account" path — signs in with the given creds
-   * (bypassing the vendor-membership check) then immediately creates the
-   * vendor row. Only usable for accounts that are already email-confirmed.
-   */
-  linkExistingAccount: (
-    email: string,
-    password: string,
-    businessName: string,
-  ) => Promise<{ error: Error | null }>;
-  /** Explicit business-creation path used when the user is already signed in
-   *  but has no vendor row (e.g. after clicking through from the "Not a
-   *  vendor" consent screen). */
-  createBusiness: (
-    businessName: string,
-  ) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
+  /** Re-reads the vendor without flipping vendorLoading (no unmounts). */
   refreshVendor: () => Promise<void>;
 }
 
@@ -123,20 +112,16 @@ function isEmailNotConfirmed(msg: string | undefined | null): boolean {
     || /confirm your email/i.test(msg);
 }
 
-function confirmationRedirectUrl(): string {
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : "";
-  return `${origin}/vendor/login?confirmed=1`;
+function asError(e: unknown): Error {
+  return e instanceof Error ? e : new Error(String(e));
 }
 
 /**
- * Central auth + vendor-row provider. Every /vendor/* route lives inside
- * this so the auth session and the linked vendor business are one source
- * of truth.
+ * Central auth + vendor provider. Every /vendor/* route lives inside this so
+ * the auth session and the linked vendor business are one source of truth.
  */
 export function VendorAuthProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = React.useState<Session | null>(null);
-  const [user, setUser] = React.useState<User | null>(null);
+  const [user, setUser] = React.useState<AuthUser | null>(null);
   const [vendor, setVendor] = React.useState<Vendor | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [vendorLoading, setVendorLoading] = React.useState(false);
@@ -145,9 +130,11 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
   // Monotonic counter: only the latest loadVendor call may write state, so a
   // slow response can't resurrect a vendor after sign-out or account switch.
   const loadSeq = React.useRef(0);
-  // The user whose vendor row is loaded (or loading). Auth fires SIGNED_IN on
-  // tab refocus and TOKEN_REFRESHED hourly; neither should reload the vendor.
+  // The user whose vendor is loaded (or loading). Identity events that don't
+  // change the user id must not reload the vendor.
   const loadedUid = React.useRef<string | null>(null);
+  // signIn() fetches /me itself; skip the duplicate auto-load meanwhile.
+  const signingIn = React.useRef(false);
 
   const loadVendor = React.useCallback(
     async (uid: string, opts: { silent?: boolean } = {}) => {
@@ -155,32 +142,22 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
       loadedUid.current = uid;
       if (!opts.silent) setVendorLoading(true);
       try {
-        const { data: memberRow, error: memberErr } = await supabase
-          .from("vendor_members")
-          .select("vendor_id")
-          .eq("user_id", uid)
-          .limit(1)
-          .maybeSingle();
-        if (memberErr) throw memberErr;
-
-        let row: Vendor | null = null;
-        if (memberRow?.vendor_id) {
-          const { data: vendorRow, error: vendorErr } = await supabase
-            .from("vendors")
-            .select("*")
-            .eq("id", memberRow.vendor_id)
-            .maybeSingle();
-          if (vendorErr) throw vendorErr;
-          row = (vendorRow as Vendor | null) ?? null;
-        }
-
+        const me = await get<MeResponse>("/me");
         if (seq !== loadSeq.current) return;
-        setVendor(row);
+        setVendor(me.vendor ?? null);
         setVendorError(null);
       } catch (e) {
         if (seq !== loadSeq.current) return;
-        // Keep any previously loaded vendor; surface the failure.
-        setVendorError(e instanceof Error ? e : new Error(String(e)));
+        if (e instanceof ApiError && e.status === 403) {
+          // Signed in but not allowed: same as "not a vendor".
+          setVendor(null);
+          setVendorError(null);
+          return;
+        }
+        // 401s already signed the user out (which bumps loadSeq). Anything
+        // else (offline, 5xx): keep any previously loaded vendor and surface
+        // the failure so the gate can offer a retry.
+        setVendorError(asError(e));
         reportError(e, { source: "loadVendor" });
       } finally {
         if (seq === loadSeq.current) setVendorLoading(false);
@@ -197,204 +174,115 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
     setVendorLoading(false);
   }, []);
 
-  // Boot + subscribe. INITIAL_SESSION carries the restored session, so no
-  // separate getSession() probe is needed (that used to load the vendor
-  // twice on every boot). When the user clicks the confirmation link,
-  // detectSessionInUrl parses the tokens and SIGNED_IN fires here.
-  React.useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((event, sess) => {
-      setSession(sess);
-      setUser(sess?.user ?? null);
-      const uid = sess?.user?.id ?? null;
-      if (!uid) {
+  const applyUser = React.useCallback(
+    (next: AuthUser | null) => {
+      setUser((prev) =>
+        prev && next && prev.id === next.id && prev.email === next.email ? prev : next,
+      );
+      if (!next) {
         clearVendor();
-      } else if (uid !== loadedUid.current) {
-        // Never await Supabase calls inside this callback (auth lock deadlock).
-        void loadVendor(uid);
+      } else if (!signingIn.current && next.id !== loadedUid.current) {
+        void loadVendor(next.id);
       }
-      if (event === "INITIAL_SESSION") setLoading(false);
+    },
+    [clearVendor, loadVendor],
+  );
+
+  React.useEffect(() => {
+    let active = true;
+    const unsubscribe = auth.onChange((u) => {
+      if (active) applyUser(u);
     });
 
-    // Safety net: if INITIAL_SESSION never arrives (storage blocked, etc.)
-    // don't leave the app on a spinner forever.
-    const fallback = window.setTimeout(() => setLoading(false), 8000);
+    auth
+      .ready()
+      .catch((e) => reportError(e, { source: "auth.ready" }))
+      .finally(() => {
+        if (!active) return;
+        applyUser(auth.getUser());
+        setLoading(false);
+      });
+
+    // Safety net: if the session restore never settles (storage blocked,
+    // auth chunk failed to load) don't leave the app on a spinner forever.
+    const fallback = window.setTimeout(() => {
+      if (active) setLoading(false);
+    }, 8000);
 
     return () => {
+      active = false;
       window.clearTimeout(fallback);
-      sub.subscription.unsubscribe();
+      unsubscribe();
     };
-  }, [loadVendor, clearVendor]);
+  }, [applyUser]);
 
   const signIn = React.useCallback(
-    async (email: string, password: string) => {
+    async (email: string, password: string): Promise<{ error: Error | null }> => {
       const normalizedEmail = email.trim().toLowerCase();
 
-      // Allowlist gate — short-circuit before we hit Supabase Auth so a
-      // non-allowlisted email never gets a real login attempt (and so we
-      // don't count against auth rate limits for people we're going to
-      // reject anyway).
+      // Allowlist gate — short-circuit before we hit the auth backend so a
+      // non-allowlisted email never gets a real login attempt (and doesn't
+      // count against auth rate limits).
       if (!isEmailAllowlisted(normalizedEmail)) {
-        return { error: ALLOWLIST_REJECTION };
+        return { error: new Error(ALLOWLIST_REJECTION_MESSAGE) };
       }
 
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
-
-      if (error) {
-        if (isEmailNotConfirmed(error.message)) {
-          return {
-            error: new Error(
-              "Confirmation not done. Check your inbox for the confirmation link and click it before signing in.",
-            ),
-          };
+      signingIn.current = true;
+      try {
+        const { error } = await auth.signIn(normalizedEmail, password);
+        if (error) {
+          if (isEmailNotConfirmed(error.message)) {
+            return {
+              error: new Error(
+                "Confirmation not done. Check your inbox for the confirmation link and click it before signing in.",
+              ),
+            };
+          }
+          return { error };
         }
-        return { error };
-      }
 
-      // auth.users is shared with the main Illuxus app, so a valid credential
-      // does NOT automatically grant access to the vendor portal. Enforce
-      // vendor membership explicitly and undo the session if the user isn't
-      // registered as a vendor.
-      const uid = data.user?.id;
-      if (!uid) {
-        await supabase.auth.signOut();
-        return { error: new Error("Sign-in failed. Please try again.") };
-      }
-
-      const { data: member, error: memberErr } = await supabase
-        .from("vendor_members")
-        .select("vendor_id")
-        .eq("user_id", uid)
-        .limit(1)
-        .maybeSingle();
-
-      if (memberErr) {
-        await supabase.auth.signOut();
-        return { error: memberErr };
-      }
-
-      if (!member) {
-        await supabase.auth.signOut();
-        return {
-          error: new Error(
-            "This email isn't registered as a vendor. Sign up to create a vendor business.",
-          ),
-        };
-      }
-
-      return { error: null };
-    },
-    [],
-  );
-
-  const signUp = React.useCallback(
-    async (email: string, password: string, businessName: string) => {
-      const normalizedEmail = email.trim().toLowerCase();
-
-      // Signup is disabled for anyone not on the invite list. The DB
-      // trigger on auth.users would happily provision a vendor row
-      // otherwise (see migration 103); this gate is what makes the
-      // portal actually invite-only.
-      if (!isEmailAllowlisted(normalizedEmail)) {
-        return { error: ALLOWLIST_REJECTION };
-      }
-
-      const { data, error } = await supabase.auth.signUp({
-        email: normalizedEmail,
-        password,
-        options: {
-          data: { business_name: businessName.trim() },
-          emailRedirectTo: confirmationRedirectUrl(),
-        },
-      });
-      if (error) return { error };
-      // When email confirmation is required, Supabase returns { user, session: null }.
-      // The on_vendor_email_confirmed() trigger runs the moment the user clicks
-      // the confirmation link, so we don't need any client-side follow-up.
-      return { error: null, needsConfirmation: !data.session };
-    },
-    [],
-  );
-
-  const resendConfirmation = React.useCallback(async (email: string) => {
-    const { error } = await supabase.auth.resend({
-      type: "signup",
-      email: email.trim().toLowerCase(),
-      options: {
-        emailRedirectTo: confirmationRedirectUrl(),
-      },
-    });
-    return { error };
-  }, []);
-
-  const createBusiness = React.useCallback(
-    async (businessName: string) => {
-      const { error } = await supabase.rpc("create_vendor_business", {
-        p_business_name: businessName,
-      });
-      if (error) return { error };
-      const { data } = await supabase.auth.getUser();
-      if (data.user?.id) await loadVendor(data.user.id);
-      return { error: null };
-    },
-    [loadVendor],
-  );
-
-  const linkExistingAccount = React.useCallback(
-    async (email: string, password: string, businessName: string) => {
-      const normalizedEmail = email.trim().toLowerCase();
-
-      // Same allowlist gate as signIn / signUp — the "link existing Illuxus
-      // account" path would otherwise let any main-app user claim a vendor
-      // profile just by knowing their own password.
-      if (!isEmailAllowlisted(normalizedEmail)) {
-        return { error: ALLOWLIST_REJECTION };
-      }
-
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
-      if (error) {
-        if (isEmailNotConfirmed(error.message)) {
-          return {
-            error: new Error(
-              "This Illuxus account hasn't confirmed its email yet. Confirm it from the main Illuxus app first, then come back.",
-            ),
-          };
+        // A valid credential does NOT automatically grant access to the
+        // vendor portal. Enforce vendor membership explicitly and undo the
+        // session if the account isn't a vendor.
+        let me: MeResponse;
+        try {
+          me = await get<MeResponse>("/me");
+        } catch (e) {
+          await auth.signOut();
+          if (e instanceof ApiError && e.status === 403) {
+            return { error: new Error(NOT_A_VENDOR_MESSAGE) };
+          }
+          return { error: asError(e) };
         }
-        return { error };
+
+        if (!me.vendor) {
+          await auth.signOut();
+          return { error: new Error(NOT_A_VENDOR_MESSAGE) };
+        }
+
+        // Prime the vendor so the dashboard doesn't fetch /me again.
+        loadSeq.current += 1;
+        loadedUid.current = me.user.id;
+        setVendor(me.vendor);
+        setVendorError(null);
+        setVendorLoading(false);
+        return { error: null };
+      } finally {
+        signingIn.current = false;
+        // Catch up on anything skipped while signing in.
+        const current = auth.getUser();
+        applyUser(current);
       }
-      const uid = data.user?.id;
-      if (!uid) {
-        await supabase.auth.signOut();
-        return { error: new Error("Sign-in failed") };
-      }
-      const { error: rpcErr } = await supabase.rpc(
-        "create_vendor_business",
-        { p_business_name: businessName },
-      );
-      if (rpcErr) {
-        await supabase.auth.signOut();
-        return { error: rpcErr };
-      }
-      await loadVendor(uid);
-      return { error: null };
     },
-    [loadVendor],
+    [applyUser],
   );
 
   const signOut = React.useCallback(async () => {
-    const { error } = await supabase.auth.signOut();
-    if (error) {
-      // Server-side revoke failed (offline, etc.). Still drop the local
-      // session so the device is signed out and a reload can't restore it.
-      reportError(error, { source: "signOut" });
-      await supabase.auth.signOut({ scope: "local" });
+    try {
+      await auth.signOut();
+    } catch (e) {
+      reportError(e, { source: "signOut" });
     }
-    setSession(null);
     setUser(null);
     clearVendor();
   }, [clearVendor]);
@@ -404,21 +292,19 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
     if (user?.id) await loadVendor(user.id, { silent: true });
   }, [user?.id, loadVendor]);
 
-  const value: VendorAuthState = {
-    loading,
-    vendorLoading,
-    session,
-    user,
-    vendor,
-    vendorError,
-    signIn,
-    signUp,
-    resendConfirmation,
-    linkExistingAccount,
-    createBusiness,
-    signOut,
-    refreshVendor,
-  };
+  const value = React.useMemo<VendorAuthState>(
+    () => ({
+      loading,
+      vendorLoading,
+      user,
+      vendor,
+      vendorError,
+      signIn,
+      signOut,
+      refreshVendor,
+    }),
+    [loading, vendorLoading, user, vendor, vendorError, signIn, signOut, refreshVendor],
+  );
 
   return (
     <VendorAuthContext.Provider value={value}>

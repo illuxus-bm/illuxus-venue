@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { ApiError, post } from "@/lib/api";
 import { cn, formatMoneyCents } from "@/lib/utils";
 import type { InboxRfq } from "@/hooks/useInboxRfqs";
 import { addDays, toDateOnly, todayDateOnly } from "@/lib/dates";
@@ -53,9 +53,8 @@ interface SendQuoteDialogProps {
 /**
  * Vendor's "Reply with quote" flow.
  *
- * Writes a row into `quotes` with status='sent'. The rfq_invitees.responded_at
- * timestamp is set automatically by the trg_quotes_touch_invitee trigger
- * installed in migration 100, so the Inbox segmentation moves the RFQ from
+ * POST /api/me/quotes creates a 'sent' quote. The server stamps the
+ * invitation's responded_at, so the Inbox segmentation moves the RFQ from
  * "New" to "Responded" without any client bookkeeping.
  */
 export function SendQuoteDialog({
@@ -85,40 +84,33 @@ export function SendQuoteDialog({
   const currency = watch("currency");
 
   const onSubmit = async (values: FormValues) => {
-    if (!vendor || !rfq) return;
+    if (!vendor || !rfq || saving) return;
     setSaving(true);
     try {
-      const payload = {
+      await post("/me/quotes", {
         rfq_id: rfq.rfq_id,
-        vendor_id: vendor.id,
-        // Store in minor units — matches vendor_bookings.total conversion.
+        // Minor units — matches vendor_bookings.total.
         total: Math.round(values.total * 100),
         currency: values.currency,
         valid_until: values.valid_until,
-        inclusions: values.inclusions?.trim() || null,
-        notes: values.notes?.trim() || null,
-        status: "sent" as const,
-      };
-      const { error } = await (supabase as any)
-        .from("quotes")
-        .insert(payload);
-      if (error) {
-        // Common: unique (rfq_id, vendor_id) constraint if the vendor already
-        // sent a quote for this RFQ. Surface that clearly.
-        if (/duplicate|unique/i.test(error.message)) {
-          toast.error(
-            "You've already sent a quote for this request. Withdraw the old one first if you need to change it.",
-          );
-        } else {
-          toast.error(error.message ?? "Could not send quote");
-        }
-        return;
-      }
+        inclusions: values.inclusions?.trim() || undefined,
+        notes: values.notes?.trim() || undefined,
+      });
       qc.invalidateQueries({ queryKey: ["vendor-inbox", vendor.id] });
       qc.invalidateQueries({ queryKey: ["vendor-quotes", vendor.id] });
       qc.invalidateQueries({ queryKey: ["vendor-stats", vendor.id] });
       toast.success("Quote sent");
       onOpenChange(false);
+    } catch (err) {
+      // Only "quote_exists" gets the withdraw hint; other 409s (request
+      // closed, declined, bad validity date) carry their own message.
+      if (err instanceof ApiError && err.code === "quote_exists") {
+        toast.error(
+          "You've already sent a quote for this request. Withdraw the old one first if you need to change it.",
+        );
+      } else {
+        toast.error((err as Error).message || "Could not send quote");
+      }
     } finally {
       setSaving(false);
     }

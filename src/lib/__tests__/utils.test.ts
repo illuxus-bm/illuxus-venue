@@ -25,12 +25,12 @@ describe("initials", () => {
 
 describe("mediaKindFromUrl", () => {
   it("lets the file extension win over a wrong hint", () => {
-    expect(mediaKindFromUrl("https://x.supabase.co/a/b.jpg", "video")).toBe("image");
-    expect(mediaKindFromUrl("https://x.supabase.co/a/b.mp4", "empty_hall")).toBe("video");
-    expect(mediaKindFromUrl("https://x.supabase.co/a/plan.pdf", null)).toBe("file");
+    expect(mediaKindFromUrl("https://cdn.example.com/a/b.jpg", "video")).toBe("image");
+    expect(mediaKindFromUrl("https://cdn.example.com/a/b.mp4", "empty_hall")).toBe("video");
+    expect(mediaKindFromUrl("https://cdn.example.com/a/plan.pdf", null)).toBe("file");
   });
 
   it("never renders SVG inline", () => {
-    expect(mediaKindFromUrl("https://x.supabase.co/a/b.svg")).toBe("file");
+    expect(mediaKindFromUrl("https://cdn.example.com/a/b.svg")).toBe("file");
   });
 });

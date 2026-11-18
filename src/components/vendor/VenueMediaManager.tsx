@@ -23,7 +23,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-import { supabase } from "@/integrations/supabase/client";
 import {
   useAddVenueMedia,
   useDeleteVenueMedia,
@@ -31,17 +30,17 @@ import {
   type VenueMediaKind,
 } from "@/hooks/useMyVenues";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
+import { patch, seg } from "@/lib/api";
 import { safeHttpUrl } from "@/lib/safeUrl";
+import { uploadFile, validateVenueMedia, VENUE_MEDIA_TYPES } from "@/lib/uploads";
 
 /**
  * Media manager for a single venue. Two responsibilities:
  *   1. Show the existing photos + floor plan grouped by media_kind.
- *   2. Upload new files → Supabase Storage → insert a venue_media row.
+ *   2. Upload new files: POST /api/me/uploads (kind "venue-media") → PUT to
+ *      the signed URL → POST /api/me/venues/:id/media with the key.
  *
- * Uses the `venue-media` public bucket (created by migration 107) with
- * paths shaped like `<venue_id>/<uuid>.<ext>`. Public read on the bucket
- * so the main app's marketplace can render URLs directly; per-object
- * update / delete guarded by owner in storage RLS.
+ * The API owns storage cleanup (failed creates, deletes, venue deletion).
  */
 
 const KIND_OPTIONS: Array<{ value: VenueMediaKind; label: string; hint: string }> = [
@@ -52,24 +51,7 @@ const KIND_OPTIONS: Array<{ value: VenueMediaKind; label: string; hint: string }
   { value: "other",      label: "Other",         hint: "Anything else worth showing" },
 ];
 
-const STORAGE_BUCKET = "venue-media";
-
-// Extension comes from the validated MIME type, never from the file name.
-const EXT_BY_MIME: Record<string, string> = {
-  "image/jpeg": "jpg",
-  "image/png": "png",
-  "image/webp": "webp",
-  "image/avif": "avif",
-  "image/gif": "gif",
-  "video/mp4": "mp4",
-  "video/webm": "webm",
-  "video/quicktime": "mov",
-  "application/pdf": "pdf",
-};
-const ACCEPT = Object.keys(EXT_BY_MIME).join(",");
-// Mirrors the bucket's file_size_limit (migration 108) so an oversized
-// video fails fast instead of after a long upload.
-const MAX_FILE_BYTES = 50 * 1024 * 1024;
+const ACCEPT = VENUE_MEDIA_TYPES.join(",");
 
 export function VenueMediaManager({
   open,
@@ -140,39 +122,22 @@ export function VenueMediaManager({
       for (let i = 0; i < list.length; i++) {
         const file = list[i];
         try {
-          if (file.size > MAX_FILE_BYTES) {
-            toast.error(`${file.name}: larger than 50 MB`);
-            failures += 1;
-            continue;
-          }
-          const ext = EXT_BY_MIME[file.type];
-          if (!ext) {
-            toast.error(`${file.name}: unsupported file type`);
+          // Same type / size limits as the server, so an oversized video
+          // fails fast instead of after a long upload.
+          const invalid = validateVenueMedia(file);
+          if (invalid) {
+            toast.error(`${file.name}: ${invalid}`);
             failures += 1;
             continue;
           }
           const isVideo = file.type.startsWith("video/");
-          // Path shape: `<venue_id>/<uuid>.<ext>`. Keeps files grouped per
-          // venue for easy inspection in the Storage dashboard and matches
-          // the storage RLS that scopes writes by object owner.
-          const objectName = `${venueId}/${crypto.randomUUID()}.${ext}`;
 
-          const { error: upErr } = await supabase.storage
-            .from(STORAGE_BUCKET)
-            .upload(objectName, file, {
-              cacheControl: "3600",
-              upsert: false,
-              contentType: file.type || undefined,
-            });
-          if (upErr) {
-            toast.error(`${file.name}: ${upErr.message ?? "Upload failed"}`);
+          const uploaded = await uploadFile(file, { kind: "venue-media", venueId });
+          if (!uploaded.ok) {
+            toast.error(`${file.name}: ${uploaded.error}`);
             failures += 1;
             continue;
           }
-
-          const { data: publicUrl } = supabase.storage
-            .from(STORAGE_BUCKET)
-            .getPublicUrl(objectName);
 
           // Videos never become the cover — marketplace cards render it as <img>.
           const isImage = file.type.startsWith("image/");
@@ -180,15 +145,15 @@ export function VenueMediaManager({
           try {
             await addMedia.mutateAsync({
               venue_id: venueId,
-              url: publicUrl.publicUrl,
+              key: uploaded.key,
               media_kind: isVideo ? "video" : pendingKind,
               caption: caption.trim() || undefined,
               is_cover: shouldCover,
             });
           } catch {
-            // The hook already toasted the error. Remove the orphaned object.
+            // The hook already toasted the error; the API cleans up the
+            // unreferenced upload.
             failures += 1;
-            void supabase.storage.from(STORAGE_BUCKET).remove([objectName]);
             continue;
           }
           if (shouldCover) alreadyHasCover = true;
@@ -231,28 +196,11 @@ export function VenueMediaManager({
     if (coverBusy) return;
     setCoverBusy(true);
     try {
-      if (nextIsCover) {
-        // Unset the current cover(s) first so we don't end up with two.
-        const current = media.filter((m) => m.is_cover && m.id !== id);
-        const results = await Promise.all(
-          current.map((m) =>
-            (supabase as any)
-              .from("venue_media")
-              .update({ is_cover: false })
-              .eq("id", m.id),
-          ),
-        );
-        const failed = results.find((r: { error: unknown }) => r.error);
-        if (failed) throw failed.error;
-      }
-      const { error } = await (supabase as any)
-        .from("venue_media")
-        .update({ is_cover: nextIsCover })
-        .eq("id", id);
-      if (error) throw error;
+      // Setting a cover unsets the others atomically on the server.
+      await patch(`/me/venue-media/${seg(id)}`, { is_cover: nextIsCover });
       toast.success(nextIsCover ? "Set as cover photo" : "Removed cover flag");
     } catch (err) {
-      toast.error((err as Error)?.message ?? "Could not update cover");
+      toast.error((err as Error)?.message || "Could not update cover");
     } finally {
       await qc.invalidateQueries({ queryKey: ["venue-media", venueId] });
       qc.invalidateQueries({ queryKey: ["vendor-venues", vendor?.id] });

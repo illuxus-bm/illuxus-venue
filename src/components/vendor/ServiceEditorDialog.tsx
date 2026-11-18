@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
-import { supabase } from "@/integrations/supabase/client";
+import { del, patch, post, seg } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { SERVICE_CATEGORIES, type MyService } from "@/hooks/useMyServices";
 import { useMyVenues } from "@/hooks/useMyVenues";
@@ -111,7 +111,6 @@ export function ServiceEditorDialog({
     setSaving(true);
     try {
       const payload = {
-        vendor_id: vendor.id,
         title: values.title,
         description: values.description?.trim() || null,
         base_price: Math.round(values.base_price * 100),
@@ -125,25 +124,16 @@ export function ServiceEditorDialog({
         venue_id: values.venue_id || null,
       };
 
-      let error;
       if (isEdit && service) {
-        ({ error } = await (supabase as any)
-          .from("vendor_services")
-          .update(payload)
-          .eq("id", service.id));
+        await patch(`/me/services/${seg(service.id)}`, payload);
       } else {
-        ({ error } = await (supabase as any)
-          .from("vendor_services")
-          .insert(payload));
-      }
-
-      if (error) {
-        toast.error(error.message ?? "Could not save service");
-        return;
+        await post("/me/services", payload);
       }
       qc.invalidateQueries({ queryKey: ["vendor-services", vendor.id] });
       toast.success(isEdit ? "Service updated" : "Service added");
       onOpenChange(false);
+    } catch (err) {
+      toast.error((err as Error).message || "Could not save service");
     } finally {
       setSaving(false);
     }
@@ -159,17 +149,12 @@ export function ServiceEditorDialog({
       return;
     setDeleting(true);
     try {
-      const { error } = await (supabase as any)
-        .from("vendor_services")
-        .delete()
-        .eq("id", service.id);
-      if (error) {
-        toast.error(error.message);
-        return;
-      }
+      await del(`/me/services/${seg(service.id)}`);
       qc.invalidateQueries({ queryKey: ["vendor-services", vendor.id] });
       toast.success("Service deleted");
       onOpenChange(false);
+    } catch (err) {
+      toast.error((err as Error).message || "Could not delete service");
     } finally {
       setDeleting(false);
     }

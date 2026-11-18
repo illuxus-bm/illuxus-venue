@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { supabase } from "@/integrations/supabase/client";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
+import { get } from "@/lib/api";
 
 export type ServiceUnit =
   | "per_hour"
@@ -56,19 +56,6 @@ export function useMyServices() {
   return useQuery<MyService[]>({
     enabled: !!vendor?.id,
     queryKey: ["vendor-services", vendor?.id],
-    queryFn: async () => {
-      const { data, error } = await (supabase as any)
-        .from("vendor_services")
-        .select(
-          "id, title, description, base_price, currency, unit, duration, is_instant_book, quote_on_request, is_active, venue_id, category",
-        )
-        .eq("vendor_id", vendor!.id)
-        .order("created_at", { ascending: true });
-      if (error) throw error;
-      return (data ?? []).map((s: any) => ({
-        ...s,
-        base_price: Number(s.base_price),
-      })) as MyService[];
-    },
+    queryFn: ({ signal }) => get<MyService[]>("/me/services", { signal }),
   });
 }

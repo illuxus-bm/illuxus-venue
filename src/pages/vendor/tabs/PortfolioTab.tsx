@@ -8,18 +8,14 @@ import { Card, CardContent } from "@/components/ui/card";
 import { ErrorState, EmptyState } from "@/components/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
-import { supabase } from "@/integrations/supabase/client";
 import { useMyPortfolio, type PortfolioItem } from "@/hooks/useMyPortfolio";
-import {
-  pathFromPublicUrl,
-  removeVendorObject,
-  uploadVendorImage,
-} from "@/lib/uploads";
+import { del, post, seg } from "@/lib/api";
+import { uploadVendorImage, VENDOR_MEDIA_TYPES } from "@/lib/uploads";
 
 /**
- * Portfolio — grid of past-work media. Uploads land in the `vendor-media`
- * bucket under `<vendor_id>/portfolio/…` and an accompanying row is
- * inserted into `vendor_portfolio`.
+ * Portfolio — grid of past-work media. Each file is uploaded as
+ * "vendor-media" (POST /api/me/uploads → PUT) and then recorded with
+ * POST /api/me/portfolio { key }.
  *
  * Multi-file selection is supported: pick as many files as you want and
  * they upload sequentially with individual toasts for each failure.
@@ -29,39 +25,30 @@ export default function PortfolioTab() {
   const qc = useQueryClient();
   const { data: items = [], isLoading, error, refetch } = useMyPortfolio();
   const [uploading, setUploading] = React.useState(false);
+  const [deletingId, setDeletingId] = React.useState<string | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const onFilesChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     e.target.value = "";
-    if (!files.length || !vendor) return;
+    if (!files.length || !vendor || uploading) return;
 
     setUploading(true);
     let succeeded = 0;
     try {
-      // Upload sequentially so we can capture partial errors and preserve
-      // the sort_order that matches the order the user picked them in.
-      let nextOrder =
-        items.reduce((max, it) => Math.max(max, it.sort_order), 0) + 1;
-
+      // Upload sequentially so we can capture partial errors and keep the
+      // order the user picked them in (the server appends to the end).
       for (const file of files) {
-        const result = await uploadVendorImage(file, vendor.id, "portfolio");
+        const result = await uploadVendorImage(file);
         if (!result.ok) {
           toast.error(`${file.name}: ${result.error}`);
           continue;
         }
-        const { error: insertErr } = await (supabase as any)
-          .from("vendor_portfolio")
-          .insert({
-            vendor_id: vendor.id,
-            url: result.url,
-            media_type: file.type.startsWith("video/") ? "video" : "image",
-            sort_order: nextOrder++,
-          });
-        if (insertErr) {
-          // If we couldn't record the row, delete the orphan object.
-          await removeVendorObject(result.path);
-          toast.error(`${file.name}: ${insertErr.message}`);
+        try {
+          await post<PortfolioItem>("/me/portfolio", { key: result.key });
+        } catch (err) {
+          // The API cleans up the unreferenced upload.
+          toast.error(`${file.name}: ${(err as Error).message}`);
           continue;
         }
         succeeded++;
@@ -79,22 +66,20 @@ export default function PortfolioTab() {
   };
 
   const onDelete = async (item: PortfolioItem) => {
-    if (!vendor) return;
+    if (!vendor || deletingId) return;
     if (!confirm("Remove this photo from your portfolio?")) return;
 
-    const { error: dbErr } = await (supabase as any)
-      .from("vendor_portfolio")
-      .delete()
-      .eq("id", item.id);
-    if (dbErr) {
-      toast.error(dbErr.message);
-      return;
+    setDeletingId(item.id);
+    try {
+      // The server deletes the stored file too.
+      await del(`/me/portfolio/${seg(item.id)}`);
+      qc.invalidateQueries({ queryKey: ["vendor-portfolio", vendor.id] });
+      toast.success("Removed");
+    } catch (err) {
+      toast.error((err as Error).message || "Could not remove photo");
+    } finally {
+      setDeletingId(null);
     }
-    // Best-effort — orphan stays if the delete on storage fails.
-    const path = pathFromPublicUrl(item.url);
-    if (path) void removeVendorObject(path);
-    qc.invalidateQueries({ queryKey: ["vendor-portfolio", vendor.id] });
-    toast.success("Removed");
   };
 
   return (
@@ -102,7 +87,7 @@ export default function PortfolioTab() {
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp"
+        accept={VENDOR_MEDIA_TYPES.join(",")}
         multiple
         className="hidden"
         onChange={onFilesChange}
@@ -161,6 +146,7 @@ export default function PortfolioTab() {
               <button
                 type="button"
                 onClick={() => onDelete(it)}
+                disabled={deletingId === it.id}
                 className="absolute right-2 top-2 grid h-9 w-9 place-items-center rounded-full bg-black/60 text-white transition-opacity focus:opacity-100 focus-visible:ring-2 focus-visible:ring-ring sm:opacity-0 sm:group-hover:opacity-100 [@media(hover:none)]:opacity-100"
                 aria-label="Remove photo"
               >

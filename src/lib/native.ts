@@ -19,11 +19,20 @@ export async function openExternal(url: string): Promise<void> {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
+export interface NativeHooks {
+  /** The app came back to the foreground (Capacitor `resume`). WebView
+   *  focus events are unreliable there, so data is refreshed from here. */
+  onResume?: () => void;
+}
+
 /**
  * One-time native setup: status bar, splash screen, Android back button,
- * external links, keyboard. A no-op on the web.
+ * external links, app resume. A no-op on the web.
  */
-export async function initNative(navigate: (to: number) => void): Promise<void> {
+export async function initNative(
+  navigate: (to: number) => void,
+  hooks: NativeHooks = {},
+): Promise<void> {
   if (!isNative) return;
   document.documentElement.classList.add("native", `platform-${platform}`);
 
@@ -57,6 +66,9 @@ export async function initNative(navigate: (to: number) => void): Promise<void> 
     if (canGoBack && window.history.length > 1) navigate(-1);
     else void App.exitApp();
   });
+
+  // Back from the background: there's no push channel, so refetch.
+  void App.addListener("resume", () => hooks.onResume?.());
 
   // Links with target="_blank" (illuxus.com, maps, socials) open in the
   // system browser instead of replacing the app's WebView.

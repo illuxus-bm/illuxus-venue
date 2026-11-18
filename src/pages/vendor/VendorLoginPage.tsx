@@ -67,9 +67,7 @@ export default function VendorLoginPage() {
       setFormError(msg);
       // Skip the toast when we're showing a rich inline hint — one clear
       // message per failure is enough.
-      if (!isNotAVendorError(msg) && !isConfirmationPending(msg)) {
-        toast.error(msg);
-      }
+      // The message is shown inline (role="alert"); no duplicate toast.
       return;
     }
     toast.success("Welcome back");
@@ -132,13 +130,19 @@ export default function VendorLoginPage() {
         </div>
 
         {formError && isNotAVendorError(formError) ? (
-          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+          <div role="alert" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
             {formError} If you should have vendor access, contact support.
           </div>
         ) : null}
 
         {formError && isConfirmationPending(formError) ? (
           <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+            {formError}
+          </div>
+        ) : null}
+
+        {formError && !isNotAVendorError(formError) && !isConfirmationPending(formError) ? (
+          <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
             {formError}
           </div>
         ) : null}

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { supabase } from "@/integrations/supabase/client";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
+import { get, patch, seg } from "@/lib/api";
 
 export type BookingStatus =
   | "pending"
@@ -29,25 +29,16 @@ export function useMyBookings() {
   return useQuery<MyBooking[]>({
     enabled: !!vendor?.id,
     queryKey: ["vendor-bookings", vendor?.id],
-    queryFn: async () => {
-      const { data, error } = await (supabase as any)
-        .from("vendor_bookings")
-        .select(
-          "id, total, currency, status, event_date, deposit_status, created_at, rfqs(requirements)",
-        )
-        .eq("vendor_id", vendor!.id)
-        .order("event_date", { ascending: true, nullsFirst: false });
-      if (error) throw error;
-      return (data ?? []).map((row: any) => ({
-        id: row.id,
-        summary: (row.rfqs?.requirements ?? "").slice(0, 120) || "Booking",
-        total: Number(row.total),
-        currency: row.currency,
-        status: row.status,
-        event_date: row.event_date,
-        deposit_status: row.deposit_status,
-        created_at: row.created_at,
-      })) as MyBooking[];
-    },
+    // Server order: by event date, undated last.
+    queryFn: ({ signal }) => get<MyBooking[]>("/me/bookings", { signal }),
   });
+}
+
+/** Fields PATCH /api/me/bookings/:id accepts — one of them per call. */
+export type BookingPatch =
+  | { status: BookingStatus }
+  | { deposit_status: MyBooking["deposit_status"] };
+
+export function updateBooking(id: string, body: BookingPatch): Promise<MyBooking> {
+  return patch<MyBooking>(`/me/bookings/${seg(id)}`, body);
 }

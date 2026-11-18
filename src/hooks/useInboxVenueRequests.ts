@@ -1,7 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { supabase } from "@/integrations/supabase/client";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
+import { get } from "@/lib/api";
+import { INBOX_POLL_MS } from "@/lib/polling";
 
 /**
  * A row in the vendor Inbox that represents an organizer directly picking
@@ -9,10 +10,8 @@ import { useVendorAuth } from "@/contexts/VendorAuthContext";
  * `event_venue_selections`. Distinct from an RFQ: the organizer already
  * committed to a specific venue, we just need Accept / Decline.
  *
- * Read through the `vendor_venue_requests()` RPC (migration 109), not a
- * direct `events!inner` join: events RLS hides DRAFT events from anyone
- * but their owner, and Quick Create saves every new event as a draft, so
- * the direct join silently dropped most requests.
+ * Read from GET /api/me/inbox/venue-requests, which already resolves the
+ * requested services and maps `event_city`.
  *
  * Segmentation into New / Responded / Expired lives in the tab component
  * (mirrors InboxRfq) so we only round-trip once.
@@ -75,55 +74,17 @@ export interface InboxVenueRequest extends InboxVenueRequestBrief {
   requested_services: InboxVenueRequestService[];
 }
 
-type RpcRow = Omit<InboxVenueRequest, "event_city" | "requested_services"> & {
-  vendor_id: string;
-  event_location: string | null;
-  event_status: string | null;
-  selected_service_ids: string[] | null;
-};
-
 export function useInboxVenueRequests() {
   const { vendor } = useVendorAuth();
 
   return useQuery<InboxVenueRequest[]>({
     enabled: !!vendor?.id,
     queryKey: ["vendor-inbox-venues", vendor?.id],
-    queryFn: async () => {
-      const { data, error } = await (supabase as any).rpc("vendor_venue_requests");
-      if (error) throw error;
-      const rows = ((data ?? []) as RpcRow[]).filter(
-        (r) => r.vendor_id === vendor!.id,
-      );
-
-      // One batch fetch for every service referenced across all rows.
-      const allServiceIds = Array.from(
-        new Set(rows.flatMap((r) => r.selected_service_ids ?? [])),
-      );
-      const serviceById = new Map<string, InboxVenueRequestService>();
-      if (allServiceIds.length > 0) {
-        const { data: services, error: servicesErr } = await (supabase as any)
-          .from("vendor_services")
-          .select("id, title, category")
-          .in("id", allServiceIds)
-          .eq("vendor_id", vendor!.id);
-        // Otherwise requested add-ons silently vanish from the request card.
-        if (servicesErr) throw servicesErr;
-        for (const s of (services ?? []) as InboxVenueRequestService[]) {
-          serviceById.set(s.id, s);
-        }
-      }
-
-      return rows.map<InboxVenueRequest>(
-        ({ vendor_id: _v, event_location, event_status: _s, selected_service_ids, ...row }) => ({
-          ...row,
-          event_city: event_location,
-          event_duration_hours:
-            row.event_duration_hours == null ? null : Number(row.event_duration_hours),
-          requested_services: (selected_service_ids ?? [])
-            .map((id) => serviceById.get(id))
-            .filter((s): s is InboxVenueRequestService => !!s),
-        }),
-      );
-    },
+    queryFn: ({ signal }) =>
+      get<InboxVenueRequest[]>("/me/inbox/venue-requests", { signal }),
+    // No push channel: poll while the dashboard is visible.
+    refetchInterval: INBOX_POLL_MS,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   });
 }

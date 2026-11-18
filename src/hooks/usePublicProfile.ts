@@ -1,15 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 
-import { supabase } from "@/integrations/supabase/client";
 import type { Venue, VenueMedia } from "@/hooks/useMyVenues";
-import { usePublicVenues, type PublicVenue } from "@/hooks/usePublicVenues";
+import {
+  getPublicOrNull,
+  usePublicVenues,
+  type PublicVenue,
+} from "@/hooks/usePublicVenues";
+import { seg } from "@/lib/api";
 
 /**
  * Reads for the public pages: the vendor profile (/v/:vendorId) and a single
- * venue (/venues/:venueId). Everything here is readable signed out:
- * vendors, vendor_portfolio and vendor_service_areas are public-read, active
- * services and venues are public-read, venue_media is public-read, and
- * reviews come through the vendor_public_reviews RPC (migration 110).
+ * venue (/venues/:venueId). Both are unauthenticated API reads
+ * (GET /api/public/vendors/:id, GET /api/public/venues/:id); a 404 renders
+ * as "not found".
  */
 
 export interface PublicVendor {
@@ -65,14 +68,8 @@ export interface PublicVendorProfile {
   serviceAreas: string[];
 }
 
-// Display columns only: auto_reply, commission_rate and notify_email are
-// readable under RLS but have no business on a public page.
-const VENDOR_COLUMNS =
-  "id, business_name, tagline, bio, website, city, country, logo_url, cover_url, years_experience, response_time_hours, socials, rating_avg, rating_count, verification_status";
-const SERVICE_COLUMNS = "id, title, description, base_price, currency, unit, duration, category, venue_id";
-
-// A malformed id in the URL would make Postgres reject the query (invalid
-// uuid); treat it as "not found" instead of an error.
+// A malformed id in the URL can't exist; skip the round-trip and treat it as
+// "not found" (the API would 404 too).
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function usePublicVendorProfile(vendorId: string | undefined) {
@@ -80,51 +77,9 @@ export function usePublicVendorProfile(vendorId: string | undefined) {
     queryKey: ["public-vendor", vendorId],
     enabled: !!vendorId,
     staleTime: 5 * 60_000,
-    queryFn: async () => {
+    queryFn: ({ signal }) => {
       if (!UUID.test(vendorId!)) return null;
-      const db = supabase as any;
-      const { data: vendor, error } = await db
-        .from("vendors")
-        .select(VENDOR_COLUMNS)
-        .eq("id", vendorId)
-        .maybeSingle();
-      if (error) throw error;
-      if (!vendor) return null;
-
-      const [services, portfolio, reviews, areas] = await Promise.all([
-        db
-          .from("vendor_services")
-          .select(SERVICE_COLUMNS)
-          .eq("vendor_id", vendorId)
-          .eq("is_active", true)
-          .order("created_at", { ascending: true }),
-        db
-          .from("vendor_portfolio")
-          .select("id, url, media_type, caption")
-          .eq("vendor_id", vendorId)
-          .order("is_cover", { ascending: false })
-          .order("sort_order", { ascending: true }),
-        db.rpc("vendor_public_reviews", { p_vendor_id: vendorId, p_limit: 12 }),
-        db.from("vendor_service_areas").select("*").eq("vendor_id", vendorId),
-      ]);
-
-      // Services and portfolio are core to the page: fail loudly instead of
-      // rendering "nothing listed". Reviews / areas stay best-effort.
-      const failed = [services, portfolio].find((r) => r.error);
-      if (failed) throw failed.error;
-
-      return {
-        vendor: vendor as PublicVendor,
-        services: ((services.data ?? []) as PublicService[]).map((s) => ({
-          ...s,
-          base_price: Number(s.base_price),
-        })),
-        portfolio: (portfolio.data ?? []) as PublicPortfolioItem[],
-        // Before migration 110 runs the RPC doesn't exist; show no reviews
-        // rather than failing the whole page.
-        reviews: reviews.error ? [] : ((reviews.data ?? []) as PublicReview[]),
-        serviceAreas: serviceAreaNames(areas.data ?? []),
-      };
+      return getPublicOrNull<PublicVendorProfile>(`/public/vendors/${seg(vendorId!)}`, signal);
     },
   });
 }
@@ -150,64 +105,9 @@ export function usePublicVenue(venueId: string | undefined) {
     queryKey: ["public-venue", venueId],
     enabled: !!venueId,
     staleTime: 5 * 60_000,
-    queryFn: async () => {
+    queryFn: ({ signal }) => {
       if (!UUID.test(venueId!)) return null;
-      const db = supabase as any;
-      // RLS returns only listed (is_active) venues to the public.
-      const { data: venue, error } = await db.from("venues").select("*").eq("id", venueId).maybeSingle();
-      if (error) throw error;
-      if (!venue) return null;
-
-      const [media, vendor, services] = await Promise.all([
-        db
-          .from("venue_media")
-          .select("*")
-          .eq("venue_id", venueId)
-          .order("is_cover", { ascending: false })
-          .order("sort_order", { ascending: true })
-          .order("created_at", { ascending: true }),
-        db
-          .from("vendors")
-          .select("id, business_name, logo_url, rating_avg, rating_count, verification_status")
-          .eq("id", venue.vendor_id)
-          .maybeSingle(),
-        // Offered here: pinned to this venue, or vendor-wide (venue_id null).
-        db
-          .from("vendor_services")
-          .select(SERVICE_COLUMNS)
-          .eq("vendor_id", venue.vendor_id)
-          .eq("is_active", true)
-          .or(`venue_id.is.null,venue_id.eq.${venueId}`)
-          .order("created_at", { ascending: true }),
-      ]);
-
-      // A failed secondary read must not render as "no photos / no services".
-      const failed = [media, vendor, services].find((r) => r.error);
-      if (failed) throw failed.error;
-
-      return {
-        venue: venue as Venue,
-        media: (media.data ?? []) as VenueMedia[],
-        vendor: vendor.data ?? {
-          id: venue.vendor_id,
-          business_name: "Venue partner",
-          logo_url: null,
-          rating_avg: null,
-          rating_count: 0,
-          verification_status: null,
-        },
-        services: ((services.data ?? []) as PublicService[]).map((s) => ({ ...s, base_price: Number(s.base_price) })),
-      };
+      return getPublicOrNull<PublicVenueDetail>(`/public/venues/${seg(venueId!)}`, signal);
     },
   });
-}
-
-/** vendor_service_areas came from the Lovable baseline with no fixed shape
- *  in this repo, so pick whichever name-like column a row has. */
-function serviceAreaNames(rows: Array<Record<string, unknown>>): string[] {
-  const names = rows
-    .map((r) => r.city ?? r.area ?? r.name ?? r.region ?? r.label)
-    .filter((n): n is string => typeof n === "string" && n.trim() !== "")
-    .map((n) => n.trim());
-  return Array.from(new Set(names));
 }

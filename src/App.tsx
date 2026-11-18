@@ -11,6 +11,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { FullPageLoader } from "@/components/FullPageLoader";
 import { NativeBridge } from "@/components/NativeBridge";
 import { ScrollToTop } from "@/components/ScrollToTop";
+import { shouldRetryQuery } from "@/lib/queryRetry";
 
 // Route-level code splitting: a visitor to the public landing page never
 // downloads the dashboard, and vice versa.
@@ -33,12 +34,8 @@ const queryClient = new QueryClient({
       // they never accept a request that was already withdrawn.
       refetchOnWindowFocus: true,
       refetchOnReconnect: true,
-      retry: (failureCount, error) => {
-        // Don't retry auth / permission / not-found errors.
-        const status = (error as { status?: number; code?: string } | null)?.status;
-        if (status && status >= 400 && status < 500) return false;
-        return failureCount < 2;
-      },
+      // 4xx never; offline / 5xx up to twice.
+      retry: shouldRetryQuery,
     },
     mutations: {
       retry: 0,
