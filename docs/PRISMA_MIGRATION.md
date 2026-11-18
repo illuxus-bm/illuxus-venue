@@ -28,13 +28,22 @@ configuration.
 
 ## Prisma setup
 
-- Schema: `server/prisma/schema.prisma`, **introspected** from the database
-  that `supabase/migrations/100-111` produce, so model and column names map
-  1:1 onto the live tables. No cross-schema relations, so it's portable to AWS.
+- Schema: `server/prisma/schema.prisma`, **introspected from an exact replica
+  of the live Supabase project** (`illuxus`, ref `xhjdcimginceibzcwzlk`): the
+  27 tables' DDL was exported read-only from the production catalog on
+  2026-11-18. No cross-schema relations, so it's portable to AWS.
 - Migrations: `server/prisma/migrations/`
-  - `0_init`: every table, index and foreign key (Prisma-generated).
-  - `1_portable_constraints`: the 51 CHECK constraints and 2 expression
-    indexes Prisma can't model. It's idempotent, so it's a no-op on Supabase.
+  - `0_init`: exactly the live tables, indexes and foreign keys.
+  - `1_portable_constraints`: the live CHECK constraints and expression/partial
+    indexes Prisma can't model. Idempotent: a no-op on Supabase.
+  - `2_integrity_rules`: the portable part of SQL migration 111 (one booking
+    per quote, one business per user, one review per booking side, http(s)-only
+    URLs, non-negative capacities). It's skipped with a NOTICE if existing rows
+    would violate a unique rule; CHECKs are `NOT VALID`.
+  - `3_self_hosted_auth`: `app_users` / `auth_sessions`, used only with
+    `AUTH_PROVIDER=local`. They sit empty and unused on Supabase.
+- `supabase/tests/01_base_schema_stub.sql` is the same live DDL, so the
+  Supabase-mode tests run on production's real table shapes.
 - Config: `prisma.config.ts`. The CLI uses `DIRECT_URL`; the API uses
   `DATABASE_URL` through `@prisma/adapter-pg`.
 - The client is generated on `npm install` (`postinstall`) into
@@ -46,22 +55,25 @@ on that DB, and it passes on a Supabase-shaped DB baselined for Prisma.
 
 ## Path A: keep the data on Supabase
 
-1. **Reconcile the schema with the real project.** The main app's base
-   tables were reconstructed from usage, not read from its migrations:
+1. **Schema reconciliation is done** (2026-11-18, against the live project).
+   It changed real things: columns the reconstructed schema assumed but
+   production doesn't have (for example `vendor_services.sort_order`,
+   `vendor_availability.created_at`, `rfqs.created_by`) would have made the
+   Services, Availability and Inbox endpoints fail in production. Re-check
+   whenever the main app changes these tables:
+   `DIRECT_URL=… npm run db:pull > /tmp/live.prisma && diff server/prisma/schema.prisma /tmp/live.prisma`.
+2. **Apply SQL migration 111** in the Supabase SQL editor (it's verified to apply
+   cleanly on the live table shapes; it skips indexes that already exist).
+3. **Baseline Prisma** (the tables already exist, so don't create them):
    ```sh
-   DIRECT_URL="postgresql://postgres.<ref>:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres" npm run db:pull > /tmp/live.prisma
-   diff server/prisma/schema.prisma /tmp/live.prisma
+   DIRECT_URL=… npm run db:baseline    # marks 0_init applied, then applies 1-3
    ```
-   Port any real differences into `schema.prisma`, then regenerate `0_init`:
-   `npx prisma migrate diff --from-empty --to-schema server/prisma/schema.prisma --script > server/prisma/migrations/0_init/migration.sql`.
-2. **Baseline** (the tables already exist, so don't create them):
-   ```sh
-   DIRECT_URL=… npm run db:baseline    # marks 0_init applied, applies 1_portable_constraints (no-op)
-   ```
-3. **API env:** `AUTH_PROVIDER=supabase`, `SUPABASE_URL`,
+   Both paths are checked locally: a fresh `migrate deploy` and a baselined
+   live replica each end with **zero drift** against `schema.prisma`.
+4. **API env:** `AUTH_PROVIDER=supabase`, `SUPABASE_URL`,
    `DATABASE_URL` (pooler :6543 is fine), `DATABASE_SSL=require`, and storage
    via Supabase's S3 endpoint (*Project Settings → Storage → S3 access keys*).
-4. **Web/native env:** `VITE_AUTH_PROVIDER=supabase`, the Supabase URL and
+5. **Web/native env:** `VITE_AUTH_PROVIDER=supabase`, the Supabase URL and
    publishable key (sign-in only), and `VITE_API_URL`.
 
 Users keep their existing accounts and passwords.

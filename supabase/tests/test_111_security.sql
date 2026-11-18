@@ -79,20 +79,20 @@ insert into public.venue_media (venue_id, url, media_kind) values
   ('00000000-0000-0000-0000-0000000000c1', 'https://x.supabase.co/a.jpg', 'empty_hall'),
   ('00000000-0000-0000-0000-0000000000c2', 'https://x.supabase.co/b.jpg', 'empty_hall');
 
-insert into public.organizations (id, name, owner_id) values
-  ('00000000-0000-0000-0000-0000000000d1', 'Org', '00000000-0000-0000-0000-0000000000a3');
+insert into public.organizations (id, name, slug, owner_id) values
+  ('00000000-0000-0000-0000-0000000000d1', 'Org', 'org-test', '00000000-0000-0000-0000-0000000000a3');
 
-insert into public.rfqs (id, org_id, event_date, status) values
-  ('00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-0000000000d1', current_date + 30, 'open'),
-  ('00000000-0000-0000-0000-0000000000e2', '00000000-0000-0000-0000-0000000000d1', current_date + 40, 'open');
+insert into public.rfqs (id, org_id, requirements, event_date, status) values
+  ('00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-0000000000d1', 'Launch event', current_date + 30, 'open'),
+  ('00000000-0000-0000-0000-0000000000e2', '00000000-0000-0000-0000-0000000000d1', 'Offsite',      current_date + 40, 'open');
 
 insert into public.rfq_invitees (rfq_id, vendor_id) values
   ('00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-00000000000a'),
   ('00000000-0000-0000-0000-0000000000e2', '00000000-0000-0000-0000-00000000000a');
 
-insert into public.quotes (id, rfq_id, vendor_id, total, currency, status) values
-  ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-00000000000a', 100000, 'INR', 'sent'),
-  ('00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-0000000000e2', '00000000-0000-0000-0000-00000000000a', 50000,  'INR', 'sent');
+insert into public.quotes (id, rfq_id, vendor_id, total, currency, status, valid_until) values
+  ('00000000-0000-0000-0000-0000000000f1', '00000000-0000-0000-0000-0000000000e1', '00000000-0000-0000-0000-00000000000a', 100000, 'INR', 'sent', current_date + 14),
+  ('00000000-0000-0000-0000-0000000000f2', '00000000-0000-0000-0000-0000000000e2', '00000000-0000-0000-0000-00000000000a', 50000,  'INR', 'sent', current_date + 14);
 
 -- ── 1 · vendors: protected columns ───────────────────────────────────────────
 select t.act_as('00000000-0000-0000-0000-0000000000a1');

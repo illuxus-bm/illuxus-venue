@@ -56,6 +56,7 @@ describe("inbox + quotes", () => {
     const sel = await h.db.event_venue_selections.create({
       data: {
         event_id: org.event.id,
+        org_id: org.org.id,
         vendor_id: vendor.id,
         venue_id: venue.id,
         selected_service_ids: [svc.id],

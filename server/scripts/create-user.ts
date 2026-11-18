@@ -48,11 +48,13 @@ async function main() {
       });
       const vendorId =
         values.join ?? (await tx.vendors.create({ data: { business_name: values.business! }, select: { id: true } })).id;
-      await tx.vendor_members.upsert({
-        where: { user_id: user.id },
-        create: { user_id: user.id, vendor_id: vendorId, role: values.role! },
-        update: { vendor_id: vendorId, role: values.role! },
-      });
+      // One business per user (no unique index on user_id until migration 111).
+      const existing = await tx.vendor_members.findFirst({ where: { user_id: user.id }, select: { id: true } });
+      if (existing) {
+        await tx.vendor_members.update({ where: { id: existing.id }, data: { vendor_id: vendorId, role: values.role! } });
+      } else {
+        await tx.vendor_members.create({ data: { user_id: user.id, vendor_id: vendorId, role: values.role! } });
+      }
       return { userId: user.id, vendorId };
     });
     console.log(`User ${email} (${result.userId}) can sign in to vendor ${result.vendorId}.`);

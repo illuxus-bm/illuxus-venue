@@ -6,12 +6,11 @@ CREATE TABLE "booking_milestones" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "booking_id" UUID NOT NULL,
     "label" TEXT NOT NULL,
-    "amount" BIGINT NOT NULL DEFAULT 0,
+    "amount" BIGINT NOT NULL,
     "due_date" DATE,
     "status" TEXT NOT NULL DEFAULT 'pending',
+    "paid_at" TIMESTAMPTZ(6),
     "sort_order" INTEGER NOT NULL DEFAULT 0,
-    "completed_at" TIMESTAMPTZ(6),
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "booking_milestones_pkey" PRIMARY KEY ("id")
 );
@@ -21,12 +20,17 @@ CREATE TABLE "event_venue_selections" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "event_id" UUID NOT NULL,
     "vendor_id" UUID NOT NULL,
-    "venue_id" UUID,
+    "org_id" UUID NOT NULL,
+    "selected_by" UUID,
     "status" TEXT NOT NULL DEFAULT 'contacted',
     "notes" TEXT,
+    "notified_at" TIMESTAMPTZ(6),
+    "responded_at" TIMESTAMPTZ(6),
+    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "selected_service_ids" UUID[] DEFAULT ARRAY[]::UUID[],
     "event_type" TEXT,
-    "event_duration_hours" DECIMAL(5,1),
+    "event_duration_hours" DECIMAL(6,2),
     "expected_attendees" INTEGER,
     "seating_capacity" INTEGER,
     "seating_arrangement" TEXT,
@@ -34,9 +38,7 @@ CREATE TABLE "event_venue_selections" (
     "needs_vip_area" BOOLEAN NOT NULL DEFAULT false,
     "needs_additional_rooms" BOOLEAN NOT NULL DEFAULT false,
     "venue_link" TEXT,
-    "responded_at" TIMESTAMPTZ(6),
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "venue_id" UUID,
     "response_notified_status" TEXT,
 
     CONSTRAINT "event_venue_selections_pkey" PRIMARY KEY ("id")
@@ -45,23 +47,43 @@ CREATE TABLE "event_venue_selections" (
 -- CreateTable
 CREATE TABLE "events" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
+    "user_id" UUID NOT NULL,
     "org_id" UUID,
-    "user_id" UUID,
     "title" TEXT NOT NULL,
     "description" TEXT,
-    "date" TIMESTAMPTZ(6),
+    "slug" TEXT NOT NULL,
+    "date" TIMESTAMPTZ(6) NOT NULL,
     "end_date" TIMESTAMPTZ(6),
-    "timezone" TEXT,
-    "location" TEXT,
     "venue" TEXT,
-    "capacity" INTEGER,
-    "event_format" TEXT,
+    "location" TEXT,
+    "capacity" INTEGER DEFAULT 0,
+    "tickets_sold" INTEGER DEFAULT 0,
+    "price" DECIMAL(10,2) DEFAULT 0,
+    "currency" TEXT NOT NULL DEFAULT 'INR',
+    "timezone" TEXT,
     "status" TEXT NOT NULL DEFAULT 'draft',
+    "event_format" TEXT NOT NULL DEFAULT 'physical',
+    "virtual_provider" TEXT,
+    "virtual_url" TEXT,
+    "requires_approval" BOOLEAN NOT NULL DEFAULT false,
+    "cover_video_url" TEXT,
+    "image_url" TEXT,
     "banner_landscape_url" TEXT,
     "banner_portrait_url" TEXT,
-    "image_url" TEXT,
+    "page_config" JSONB,
+    "attendance_target_pct" INTEGER,
+    "webinar_branding_enabled" BOOLEAN,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "speaker_applications_enabled" BOOLEAN NOT NULL DEFAULT true,
+    "sponsor_applications_enabled" BOOLEAN NOT NULL DEFAULT true,
+    "create_community" BOOLEAN NOT NULL DEFAULT true,
+    "community_category" TEXT DEFAULT 'other',
+    "previous_event_id" UUID,
+    "video_provider" TEXT,
+    "published" BOOLEAN DEFAULT false,
+    "deleted_at" TIMESTAMPTZ(6),
+    "ask_sponsor_consent" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "events_pkey" PRIMARY KEY ("id")
 );
@@ -72,7 +94,7 @@ CREATE TABLE "org_members" (
     "org_id" UUID NOT NULL,
     "user_id" UUID NOT NULL,
     "role" TEXT NOT NULL DEFAULT 'member',
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "joined_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "org_members_pkey" PRIMARY KEY ("id")
 );
@@ -81,9 +103,22 @@ CREATE TABLE "org_members" (
 CREATE TABLE "organizations" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "name" TEXT NOT NULL,
-    "owner_id" UUID,
+    "slug" TEXT NOT NULL,
+    "subdomain" TEXT,
+    "custom_domain" TEXT,
+    "custom_domain_verified" BOOLEAN NOT NULL DEFAULT false,
+    "logo_url" TEXT,
+    "owner_id" UUID NOT NULL,
+    "plan" TEXT NOT NULL DEFAULT 'free',
+    "plan_limits" JSONB NOT NULL DEFAULT '{"features": ["basic_analytics"], "max_events": 3, "max_team_members": 1, "max_attendees_per_event": 50}',
+    "addons" TEXT[] DEFAULT ARRAY[]::TEXT[],
+    "billing_email" TEXT,
+    "landing_config" JSONB NOT NULL DEFAULT '{}',
+    "landing_published" BOOLEAN NOT NULL DEFAULT false,
+    "webinar_branding_enabled" BOOLEAN NOT NULL DEFAULT true,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "feature_overrides" JSONB NOT NULL DEFAULT '{}',
 
     CONSTRAINT "organizations_pkey" PRIMARY KEY ("id")
 );
@@ -93,13 +128,39 @@ CREATE TABLE "profiles" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "user_id" UUID NOT NULL,
     "display_name" TEXT,
+    "avatar_url" TEXT,
+    "bio" TEXT,
+    "account_type" TEXT NOT NULL DEFAULT 'attendee',
+    "username" TEXT,
+    "headline" TEXT,
+    "title" TEXT,
     "first_name" TEXT,
     "last_name" TEXT,
-    "avatar_url" TEXT,
+    "department" TEXT,
+    "designation" TEXT,
+    "company" TEXT,
     "mobile_country_code" TEXT,
     "mobile_number" TEXT,
+    "mobile_verified" BOOLEAN NOT NULL DEFAULT false,
+    "email_verified" BOOLEAN NOT NULL DEFAULT false,
+    "linkedin_url" TEXT,
+    "company_website" TEXT,
+    "company_employee_count" TEXT,
+    "industry" TEXT,
+    "city_id" UUID,
+    "two_factor_enabled" BOOLEAN NOT NULL DEFAULT false,
+    "profile_completed" BOOLEAN NOT NULL DEFAULT false,
+    "onboarding_completed" BOOLEAN NOT NULL DEFAULT false,
+    "video_fx_prefs" JSONB NOT NULL DEFAULT '{}',
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "banned_at" TIMESTAMPTZ(6),
+    "banned_reason" TEXT,
+    "utm_source" TEXT,
+    "utm_medium" TEXT,
+    "utm_campaign" TEXT,
+    "utm_content" TEXT,
+    "utm_term" TEXT,
 
     CONSTRAINT "profiles_pkey" PRIMARY KEY ("id")
 );
@@ -109,11 +170,8 @@ CREATE TABLE "quote_line_items" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "quote_id" UUID NOT NULL,
     "description" TEXT NOT NULL,
-    "quantity" DECIMAL(10,2) NOT NULL DEFAULT 1,
-    "unit_price" BIGINT NOT NULL DEFAULT 0,
-    "amount" BIGINT NOT NULL DEFAULT 0,
+    "amount" BIGINT NOT NULL,
     "sort_order" INTEGER NOT NULL DEFAULT 0,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "quote_line_items_pkey" PRIMARY KEY ("id")
 );
@@ -125,7 +183,7 @@ CREATE TABLE "quotes" (
     "vendor_id" UUID NOT NULL,
     "total" BIGINT NOT NULL,
     "currency" TEXT NOT NULL DEFAULT 'USD',
-    "valid_until" DATE,
+    "valid_until" DATE NOT NULL,
     "inclusions" TEXT,
     "notes" TEXT,
     "status" TEXT NOT NULL DEFAULT 'draft',
@@ -153,15 +211,15 @@ CREATE TABLE "rfqs" (
     "org_id" UUID NOT NULL,
     "event_id" UUID,
     "category_id" UUID,
-    "created_by" UUID,
-    "requirements" TEXT NOT NULL DEFAULT '',
-    "event_city" TEXT,
-    "event_date" DATE,
-    "expected_guests" INTEGER,
     "budget_min" BIGINT,
     "budget_max" BIGINT,
     "currency" TEXT NOT NULL DEFAULT 'USD',
+    "event_date" DATE,
+    "event_city" TEXT,
+    "expected_guests" INTEGER,
+    "requirements" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'open',
+    "expires_at" TIMESTAMPTZ(6),
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "rfqs_pkey" PRIMARY KEY ("id")
@@ -172,10 +230,9 @@ CREATE TABLE "vendor_availability" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "vendor_id" UUID NOT NULL,
     "date" DATE NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'held',
+    "status" TEXT NOT NULL DEFAULT 'available',
     "note" TEXT,
     "booking_id" UUID,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "venue_id" UUID,
 
     CONSTRAINT "vendor_availability_pkey" PRIMARY KEY ("id")
@@ -189,13 +246,14 @@ CREATE TABLE "vendor_bookings" (
     "org_id" UUID NOT NULL,
     "vendor_id" UUID NOT NULL,
     "event_id" UUID,
-    "total" BIGINT NOT NULL DEFAULT 0,
+    "total" BIGINT NOT NULL,
     "currency" TEXT NOT NULL DEFAULT 'USD',
-    "commission_rate" DECIMAL(5,2) NOT NULL DEFAULT 10.00,
     "commission_amount" BIGINT NOT NULL DEFAULT 0,
-    "event_date" DATE,
+    "commission_rate" DECIMAL(5,2) NOT NULL DEFAULT 10.00,
     "status" TEXT NOT NULL DEFAULT 'pending',
+    "contract_url" TEXT,
     "deposit_status" TEXT NOT NULL DEFAULT 'pending',
+    "event_date" DATE,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -205,10 +263,9 @@ CREATE TABLE "vendor_bookings" (
 -- CreateTable
 CREATE TABLE "vendor_categories" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "slug" TEXT NOT NULL,
     "name" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
     "icon" TEXT,
-    "sort_order" INTEGER NOT NULL DEFAULT 0,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "vendor_categories_pkey" PRIMARY KEY ("id")
@@ -218,7 +275,6 @@ CREATE TABLE "vendor_categories" (
 CREATE TABLE "vendor_category_map" (
     "vendor_id" UUID NOT NULL,
     "category_id" UUID NOT NULL,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "vendor_category_map_pkey" PRIMARY KEY ("vendor_id","category_id")
 );
@@ -237,11 +293,13 @@ CREATE TABLE "vendor_email_otps" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "email" TEXT NOT NULL,
     "code_hash" TEXT NOT NULL,
-    "purpose" TEXT NOT NULL,
+    "purpose" TEXT NOT NULL DEFAULT 'signup',
     "attempts" INTEGER NOT NULL DEFAULT 0,
+    "max_attempts" INTEGER NOT NULL DEFAULT 5,
     "expires_at" TIMESTAMPTZ(6) NOT NULL,
     "consumed_at" TIMESTAMPTZ(6),
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "ip_hash" TEXT,
 
     CONSTRAINT "vendor_email_otps_pkey" PRIMARY KEY ("id")
 );
@@ -249,9 +307,9 @@ CREATE TABLE "vendor_email_otps" (
 -- CreateTable
 CREATE TABLE "vendor_members" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "vendor_id" UUID NOT NULL,
     "user_id" UUID NOT NULL,
-    "role" TEXT NOT NULL DEFAULT 'staff',
+    "vendor_id" UUID NOT NULL,
+    "role" TEXT NOT NULL DEFAULT 'owner',
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "vendor_members_pkey" PRIMARY KEY ("id")
@@ -260,12 +318,12 @@ CREATE TABLE "vendor_members" (
 -- CreateTable
 CREATE TABLE "vendor_message_threads" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "org_id" UUID NOT NULL,
-    "vendor_id" UUID NOT NULL,
     "rfq_id" UUID,
     "booking_id" UUID,
-    "last_message_at" TIMESTAMPTZ(6),
+    "org_id" UUID NOT NULL,
+    "vendor_id" UUID NOT NULL,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "last_message_at" TIMESTAMPTZ(6),
 
     CONSTRAINT "vendor_message_threads_pkey" PRIMARY KEY ("id")
 );
@@ -275,10 +333,8 @@ CREATE TABLE "vendor_messages" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "thread_id" UUID NOT NULL,
     "sender_id" UUID NOT NULL,
-    "sender_type" TEXT NOT NULL DEFAULT 'vendor',
     "body" TEXT NOT NULL,
-    "attachments" JSONB NOT NULL DEFAULT '[]',
-    "read_at" TIMESTAMPTZ(6),
+    "attachments" JSONB DEFAULT '[]',
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "vendor_messages_pkey" PRIMARY KEY ("id")
@@ -289,10 +345,10 @@ CREATE TABLE "vendor_portfolio" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "vendor_id" UUID NOT NULL,
     "url" TEXT NOT NULL,
-    "media_type" TEXT NOT NULL DEFAULT 'image',
     "caption" TEXT,
-    "is_cover" BOOLEAN NOT NULL DEFAULT false,
     "sort_order" INTEGER NOT NULL DEFAULT 0,
+    "is_cover" BOOLEAN NOT NULL DEFAULT false,
+    "media_type" TEXT NOT NULL DEFAULT 'image',
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "vendor_portfolio_pkey" PRIMARY KEY ("id")
@@ -304,7 +360,7 @@ CREATE TABLE "vendor_reviews" (
     "booking_id" UUID NOT NULL,
     "reviewer_id" UUID NOT NULL,
     "reviewer_type" TEXT NOT NULL,
-    "rating" SMALLINT NOT NULL,
+    "rating" INTEGER NOT NULL,
     "comment" TEXT,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -315,10 +371,9 @@ CREATE TABLE "vendor_reviews" (
 CREATE TABLE "vendor_service_addons" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "service_id" UUID NOT NULL,
-    "title" TEXT NOT NULL,
-    "description" TEXT,
+    "name" TEXT NOT NULL,
     "price" BIGINT NOT NULL DEFAULT 0,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "is_optional" BOOLEAN NOT NULL DEFAULT true,
 
     CONSTRAINT "vendor_service_addons_pkey" PRIMARY KEY ("id")
 );
@@ -328,9 +383,8 @@ CREATE TABLE "vendor_service_areas" (
     "id" UUID NOT NULL DEFAULT gen_random_uuid(),
     "vendor_id" UUID NOT NULL,
     "city" TEXT NOT NULL,
-    "country" TEXT,
+    "country" TEXT NOT NULL,
     "radius_km" INTEGER,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "vendor_service_areas_pkey" PRIMARY KEY ("id")
 );
@@ -346,11 +400,9 @@ CREATE TABLE "vendor_services" (
     "unit" TEXT NOT NULL DEFAULT 'per_event',
     "duration" TEXT,
     "is_instant_book" BOOLEAN NOT NULL DEFAULT false,
-    "quote_on_request" BOOLEAN NOT NULL DEFAULT false,
+    "quote_on_request" BOOLEAN NOT NULL DEFAULT true,
     "is_active" BOOLEAN NOT NULL DEFAULT true,
-    "sort_order" INTEGER NOT NULL DEFAULT 0,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "venue_id" UUID,
     "category" TEXT,
 
@@ -374,12 +426,19 @@ CREATE TABLE "vendors" (
     "notify_email" BOOLEAN NOT NULL DEFAULT true,
     "auto_reply" TEXT,
     "default_currency" TEXT NOT NULL DEFAULT 'USD',
-    "rating_avg" DECIMAL(3,2) DEFAULT 0,
+    "rating_avg" DECIMAL(3,2),
     "rating_count" INTEGER NOT NULL DEFAULT 0,
     "verification_status" TEXT NOT NULL DEFAULT 'unverified',
+    "kyc_submitted_at" TIMESTAMPTZ(6),
+    "kyc_verified_at" TIMESTAMPTZ(6),
     "commission_rate" DECIMAL(5,2) NOT NULL DEFAULT 10.00,
     "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "bank_name" TEXT,
+    "bank_account_number" TEXT,
+    "bank_routing" TEXT,
+    "bank_country" TEXT,
+    "tax_id" TEXT,
 
     CONSTRAINT "vendors_pkey" PRIMARY KEY ("id")
 );
@@ -446,125 +505,161 @@ CREATE TABLE "venues" (
     CONSTRAINT "venues_pkey" PRIMARY KEY ("id")
 );
 
--- CreateTable
-CREATE TABLE "app_users" (
-    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "email" TEXT NOT NULL,
-    "password_hash" TEXT NOT NULL,
-    "display_name" TEXT,
-    "email_verified_at" TIMESTAMPTZ(6),
-    "disabled_at" TIMESTAMPTZ(6),
-    "failed_logins" INTEGER NOT NULL DEFAULT 0,
-    "locked_until" TIMESTAMPTZ(6),
-    "last_login_at" TIMESTAMPTZ(6),
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updated_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "app_users_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
-CREATE TABLE "auth_sessions" (
-    "id" UUID NOT NULL DEFAULT gen_random_uuid(),
-    "user_id" UUID NOT NULL,
-    "family_id" UUID NOT NULL,
-    "token_hash" TEXT NOT NULL,
-    "user_agent" TEXT,
-    "ip" TEXT,
-    "expires_at" TIMESTAMPTZ(6) NOT NULL,
-    "revoked_at" TIMESTAMPTZ(6),
-    "replaced_by" UUID,
-    "created_at" TIMESTAMPTZ(6) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "auth_sessions_pkey" PRIMARY KEY ("id")
-);
+-- CreateIndex
+CREATE INDEX "booking_milestones_booking_id_fkey_idx" ON "booking_milestones"("booking_id");
 
 -- CreateIndex
-CREATE INDEX "event_venue_selections_event_id_idx" ON "event_venue_selections"("event_id");
+CREATE INDEX "event_venue_selections_selected_by_fkey_idx" ON "event_venue_selections"("selected_by");
 
 -- CreateIndex
-CREATE INDEX "event_venue_selections_vendor_id_idx" ON "event_venue_selections"("vendor_id");
+CREATE INDEX "event_venue_selections_venue_id_idx" ON "event_venue_selections"("venue_id");
 
 -- CreateIndex
-CREATE INDEX "event_venue_selections_vendor_idx" ON "event_venue_selections"("vendor_id");
+CREATE INDEX "idx_event_venue_selections_event" ON "event_venue_selections"("event_id");
 
 -- CreateIndex
-CREATE INDEX "event_venue_selections_venue_status_idx" ON "event_venue_selections"("venue_id", "status");
+CREATE INDEX "idx_event_venue_selections_org" ON "event_venue_selections"("org_id");
+
+-- CreateIndex
+CREATE INDEX "idx_event_venue_selections_vendor" ON "event_venue_selections"("vendor_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "event_venue_selections_event_id_vendor_id_key" ON "event_venue_selections"("event_id", "vendor_id");
+
+-- CreateIndex
+CREATE INDEX "events_previous_event_idx" ON "events"("previous_event_id") WHERE (previous_event_id IS NOT NULL);
+
+-- CreateIndex
+CREATE INDEX "events_slug_idx" ON "events"("slug");
+
+-- CreateIndex
+CREATE INDEX "idx_events_org_date" ON "events"("org_id", "date" DESC);
+
+-- CreateIndex
+CREATE INDEX "idx_events_org_id" ON "events"("org_id");
+
+-- CreateIndex
+CREATE INDEX "idx_events_status_date" ON "events"("status", "date" DESC);
+
+-- CreateIndex
+CREATE INDEX "idx_events_user_id" ON "events"("user_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "events_slug_org_unique" ON "events"("org_id", "slug");
+
+-- CreateIndex
+CREATE INDEX "idx_org_members_org_id" ON "org_members"("org_id");
+
+-- CreateIndex
+CREATE INDEX "idx_org_members_user_id" ON "org_members"("user_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "org_members_org_id_user_id_key" ON "org_members"("org_id", "user_id");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "organizations_slug_key" ON "organizations"("slug");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "profiles_user_id_key" ON "profiles"("user_id");
 
 -- CreateIndex
-CREATE INDEX "quotes_rfq_idx" ON "quotes"("rfq_id");
+CREATE INDEX "idx_profiles_account_type" ON "profiles"("account_type");
 
 -- CreateIndex
-CREATE INDEX "quotes_vendor_idx" ON "quotes"("vendor_id");
+CREATE INDEX "quote_line_items_quote_id_fkey_idx" ON "quote_line_items"("quote_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "quotes_rfq_id_vendor_id_key" ON "quotes"("rfq_id", "vendor_id");
+CREATE INDEX "idx_quotes_rfq" ON "quotes"("rfq_id");
 
 -- CreateIndex
-CREATE INDEX "rfq_invitees_rfq_vendor_idx" ON "rfq_invitees"("rfq_id", "vendor_id");
+CREATE INDEX "idx_quotes_vendor" ON "quotes"("vendor_id");
 
 -- CreateIndex
-CREATE INDEX "rfq_invitees_vendor_idx" ON "rfq_invitees"("vendor_id");
+CREATE INDEX "idx_rfq_invitees_vendor" ON "rfq_invitees"("vendor_id");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "rfq_invitees_rfq_id_vendor_id_key" ON "rfq_invitees"("rfq_id", "vendor_id");
 
 -- CreateIndex
-CREATE INDEX "vendor_availability_booking_idx" ON "vendor_availability"("booking_id");
+CREATE INDEX "rfqs_category_id_fkey_idx" ON "rfqs"("category_id");
 
 -- CreateIndex
-CREATE INDEX "vendor_availability_venue_idx" ON "vendor_availability"("venue_id");
+CREATE INDEX "idx_vendor_availability_vendor_date" ON "vendor_availability"("vendor_id", "date");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "vendor_bookings_quote_id_uniq" ON "vendor_bookings"("quote_id") WHERE (quote_id IS NOT NULL);
+CREATE INDEX "vendor_availability_venue_id_fkey_idx" ON "vendor_availability"("venue_id");
 
 -- CreateIndex
-CREATE INDEX "vendor_bookings_org_idx" ON "vendor_bookings"("org_id");
+CREATE INDEX "idx_vendor_bookings_org" ON "vendor_bookings"("org_id");
 
 -- CreateIndex
-CREATE INDEX "vendor_bookings_vendor_idx" ON "vendor_bookings"("vendor_id");
+CREATE INDEX "idx_vendor_bookings_vendor" ON "vendor_bookings"("vendor_id");
+
+-- CreateIndex
+CREATE INDEX "vendor_bookings_quote_id_fkey_idx" ON "vendor_bookings"("quote_id");
+
+-- CreateIndex
+CREATE INDEX "vendor_bookings_rfq_id_fkey_idx" ON "vendor_bookings"("rfq_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "vendor_categories_name_key" ON "vendor_categories"("name");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "vendor_categories_slug_key" ON "vendor_categories"("slug");
 
 -- CreateIndex
-CREATE INDEX "idx_vendor_email_otps_expires" ON "vendor_email_otps"("expires_at") WHERE (consumed_at IS NULL);
+CREATE INDEX "vendor_category_map_category_id_fkey_idx" ON "vendor_category_map"("category_id");
+
+-- CreateIndex
+CREATE INDEX "idx_vendor_email_otps_expires" ON "vendor_email_otps"("expires_at");
 
 -- CreateIndex
 CREATE INDEX "idx_vendor_email_otps_lookup" ON "vendor_email_otps"("email", "purpose", "created_at" DESC) WHERE (consumed_at IS NULL);
 
 -- CreateIndex
-CREATE UNIQUE INDEX "vendor_members_user_id_uniq" ON "vendor_members"("user_id");
+CREATE INDEX "idx_vendor_members_user" ON "vendor_members"("user_id");
 
 -- CreateIndex
-CREATE INDEX "vendor_members_user_vendor_idx" ON "vendor_members"("user_id", "vendor_id");
+CREATE INDEX "idx_vendor_members_vendor" ON "vendor_members"("vendor_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "vendor_members_vendor_id_user_id_key" ON "vendor_members"("vendor_id", "user_id");
+CREATE UNIQUE INDEX "vendor_members_user_id_vendor_id_key" ON "vendor_members"("user_id", "vendor_id");
 
 -- CreateIndex
-CREATE INDEX "vendor_portfolio_vendor_idx" ON "vendor_portfolio"("vendor_id");
+CREATE INDEX "vendor_message_threads_booking_id_fkey_idx" ON "vendor_message_threads"("booking_id");
 
 -- CreateIndex
-CREATE INDEX "vendor_reviews_booking_idx" ON "vendor_reviews"("booking_id");
+CREATE INDEX "vendor_message_threads_rfq_id_fkey_idx" ON "vendor_message_threads"("rfq_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "vendor_reviews_booking_id_reviewer_type_key" ON "vendor_reviews"("booking_id", "reviewer_type");
+CREATE INDEX "vendor_message_threads_vendor_id_fkey_idx" ON "vendor_message_threads"("vendor_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "vendor_reviews_booking_reviewer_uniq" ON "vendor_reviews"("booking_id", "reviewer_type");
+CREATE INDEX "idx_vendor_messages_thread" ON "vendor_messages"("thread_id");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "vendor_service_areas_vendor_id_city_key" ON "vendor_service_areas"("vendor_id", "city");
+CREATE INDEX "vendor_messages_sender_id_fkey_idx" ON "vendor_messages"("sender_id");
 
 -- CreateIndex
-CREATE INDEX "vendor_services_vendor_idx" ON "vendor_services"("vendor_id");
+CREATE INDEX "vendor_portfolio_vendor_id_fkey_idx" ON "vendor_portfolio"("vendor_id");
+
+-- CreateIndex
+CREATE INDEX "idx_vendor_reviews_booking" ON "vendor_reviews"("booking_id");
+
+-- CreateIndex
+CREATE INDEX "vendor_reviews_reviewer_id_fkey_idx" ON "vendor_reviews"("reviewer_id");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "vendor_reviews_booking_id_reviewer_id_key" ON "vendor_reviews"("booking_id", "reviewer_id");
+
+-- CreateIndex
+CREATE INDEX "vendor_service_addons_service_id_fkey_idx" ON "vendor_service_addons"("service_id");
+
+-- CreateIndex
+CREATE INDEX "vendor_service_areas_vendor_id_fkey_idx" ON "vendor_service_areas"("vendor_id");
+
+-- CreateIndex
+CREATE INDEX "idx_vendor_services_vendor" ON "vendor_services"("vendor_id");
 
 -- CreateIndex
 CREATE INDEX "vendor_services_venue_id_idx" ON "vendor_services"("venue_id");
@@ -578,18 +673,6 @@ CREATE INDEX "venues_is_active_idx" ON "venues"("is_active");
 -- CreateIndex
 CREATE INDEX "venues_vendor_id_idx" ON "venues"("vendor_id");
 
--- CreateIndex
-CREATE UNIQUE INDEX "app_users_email_key" ON "app_users"("email");
-
--- CreateIndex
-CREATE UNIQUE INDEX "auth_sessions_token_hash_key" ON "auth_sessions"("token_hash");
-
--- CreateIndex
-CREATE INDEX "auth_sessions_user_id_idx" ON "auth_sessions"("user_id");
-
--- CreateIndex
-CREATE INDEX "auth_sessions_family_id_idx" ON "auth_sessions"("family_id");
-
 -- AddForeignKey
 ALTER TABLE "booking_milestones" ADD CONSTRAINT "booking_milestones_booking_id_fkey" FOREIGN KEY ("booking_id") REFERENCES "vendor_bookings"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
 
@@ -600,7 +683,13 @@ ALTER TABLE "event_venue_selections" ADD CONSTRAINT "event_venue_selections_even
 ALTER TABLE "event_venue_selections" ADD CONSTRAINT "event_venue_selections_vendor_id_fkey" FOREIGN KEY ("vendor_id") REFERENCES "vendors"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
 
 -- AddForeignKey
-ALTER TABLE "events" ADD CONSTRAINT "events_org_id_fkey" FOREIGN KEY ("org_id") REFERENCES "organizations"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+ALTER TABLE "event_venue_selections" ADD CONSTRAINT "event_venue_selections_venue_id_fkey" FOREIGN KEY ("venue_id") REFERENCES "venues"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "events" ADD CONSTRAINT "events_org_id_fkey" FOREIGN KEY ("org_id") REFERENCES "organizations"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
+
+-- AddForeignKey
+ALTER TABLE "events" ADD CONSTRAINT "events_previous_event_id_fkey" FOREIGN KEY ("previous_event_id") REFERENCES "events"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "org_members" ADD CONSTRAINT "org_members_org_id_fkey" FOREIGN KEY ("org_id") REFERENCES "organizations"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
@@ -621,16 +710,7 @@ ALTER TABLE "rfq_invitees" ADD CONSTRAINT "rfq_invitees_rfq_id_fkey" FOREIGN KEY
 ALTER TABLE "rfq_invitees" ADD CONSTRAINT "rfq_invitees_vendor_id_fkey" FOREIGN KEY ("vendor_id") REFERENCES "vendors"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
 
 -- AddForeignKey
-ALTER TABLE "rfqs" ADD CONSTRAINT "rfqs_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "vendor_categories"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
-
--- AddForeignKey
-ALTER TABLE "rfqs" ADD CONSTRAINT "rfqs_event_id_fkey" FOREIGN KEY ("event_id") REFERENCES "events"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
-
--- AddForeignKey
-ALTER TABLE "rfqs" ADD CONSTRAINT "rfqs_org_id_fkey" FOREIGN KEY ("org_id") REFERENCES "organizations"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
-
--- AddForeignKey
-ALTER TABLE "vendor_availability" ADD CONSTRAINT "vendor_availability_booking_id_fkey" FOREIGN KEY ("booking_id") REFERENCES "vendor_bookings"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
+ALTER TABLE "rfqs" ADD CONSTRAINT "rfqs_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "vendor_categories"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "vendor_availability" ADD CONSTRAINT "vendor_availability_vendor_id_fkey" FOREIGN KEY ("vendor_id") REFERENCES "vendors"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
@@ -639,16 +719,10 @@ ALTER TABLE "vendor_availability" ADD CONSTRAINT "vendor_availability_vendor_id_
 ALTER TABLE "vendor_availability" ADD CONSTRAINT "vendor_availability_venue_id_fkey" FOREIGN KEY ("venue_id") REFERENCES "venues"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
 
 -- AddForeignKey
-ALTER TABLE "vendor_bookings" ADD CONSTRAINT "vendor_bookings_event_id_fkey" FOREIGN KEY ("event_id") REFERENCES "events"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
+ALTER TABLE "vendor_bookings" ADD CONSTRAINT "vendor_bookings_quote_id_fkey" FOREIGN KEY ("quote_id") REFERENCES "quotes"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
-ALTER TABLE "vendor_bookings" ADD CONSTRAINT "vendor_bookings_org_id_fkey" FOREIGN KEY ("org_id") REFERENCES "organizations"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
-
--- AddForeignKey
-ALTER TABLE "vendor_bookings" ADD CONSTRAINT "vendor_bookings_quote_id_fkey" FOREIGN KEY ("quote_id") REFERENCES "quotes"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
-
--- AddForeignKey
-ALTER TABLE "vendor_bookings" ADD CONSTRAINT "vendor_bookings_rfq_id_fkey" FOREIGN KEY ("rfq_id") REFERENCES "rfqs"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
+ALTER TABLE "vendor_bookings" ADD CONSTRAINT "vendor_bookings_rfq_id_fkey" FOREIGN KEY ("rfq_id") REFERENCES "rfqs"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "vendor_bookings" ADD CONSTRAINT "vendor_bookings_vendor_id_fkey" FOREIGN KEY ("vendor_id") REFERENCES "vendors"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
@@ -663,13 +737,10 @@ ALTER TABLE "vendor_category_map" ADD CONSTRAINT "vendor_category_map_vendor_id_
 ALTER TABLE "vendor_members" ADD CONSTRAINT "vendor_members_vendor_id_fkey" FOREIGN KEY ("vendor_id") REFERENCES "vendors"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
 
 -- AddForeignKey
-ALTER TABLE "vendor_message_threads" ADD CONSTRAINT "vendor_message_threads_booking_id_fkey" FOREIGN KEY ("booking_id") REFERENCES "vendor_bookings"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
+ALTER TABLE "vendor_message_threads" ADD CONSTRAINT "vendor_message_threads_booking_id_fkey" FOREIGN KEY ("booking_id") REFERENCES "vendor_bookings"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
-ALTER TABLE "vendor_message_threads" ADD CONSTRAINT "vendor_message_threads_org_id_fkey" FOREIGN KEY ("org_id") REFERENCES "organizations"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
-
--- AddForeignKey
-ALTER TABLE "vendor_message_threads" ADD CONSTRAINT "vendor_message_threads_rfq_id_fkey" FOREIGN KEY ("rfq_id") REFERENCES "rfqs"("id") ON DELETE SET NULL ON UPDATE NO ACTION;
+ALTER TABLE "vendor_message_threads" ADD CONSTRAINT "vendor_message_threads_rfq_id_fkey" FOREIGN KEY ("rfq_id") REFERENCES "rfqs"("id") ON DELETE NO ACTION ON UPDATE NO ACTION;
 
 -- AddForeignKey
 ALTER TABLE "vendor_message_threads" ADD CONSTRAINT "vendor_message_threads_vendor_id_fkey" FOREIGN KEY ("vendor_id") REFERENCES "vendors"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
@@ -700,7 +771,4 @@ ALTER TABLE "venue_media" ADD CONSTRAINT "venue_media_venue_id_fkey" FOREIGN KEY
 
 -- AddForeignKey
 ALTER TABLE "venues" ADD CONSTRAINT "venues_vendor_id_fkey" FOREIGN KEY ("vendor_id") REFERENCES "vendors"("id") ON DELETE CASCADE ON UPDATE NO ACTION;
-
--- AddForeignKey
-ALTER TABLE "auth_sessions" ADD CONSTRAINT "auth_sessions_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "app_users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 

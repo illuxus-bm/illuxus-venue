@@ -1,402 +1,188 @@
 -- =============================================================================
--- 01_base_schema_stub.sql
---
--- INFERRED STAND-IN for the shared Illuxus base schema. FOR TESTS ONLY.
---
--- The real tables live in the shared Illuxus Supabase project (created by the
--- main app / Lovable) and are NOT in this repo. supabase/migrations/100+ only
--- add RLS, functions, triggers and storage policies on top of them. This file
--- recreates those tables with columns, keys, FKs, CHECKs and unique
--- constraints inferred from:
---   • the migrations themselves (columns their functions / policies use), and
---   • the frontend (src/hooks/*.ts, src/pages/**, src/contexts/
---     VendorAuthContext.tsx, src/integrations/supabase/types.ts).
---
--- Where the real shape is unknown, choices are conservative and noted inline.
--- It may drift from production; if a migration depends on a detail not seen
--- here, extend this file rather than the migration.
---
--- Deliberately NOT created here (the migrations create them):
---   venues, venue_media (106), vendor_email_allowlist (105).
--- RLS is NOT enabled here; the migrations do that.
--- Requires 00_supabase_stub.sql (auth.users, gen_random_uuid, roles).
+-- Base schema for tests: EXACT DDL of the live Supabase project's tables that
+-- the vendor app and its migrations touch (columns, types, defaults, keys,
+-- checks, indexes), exported read-only from the production catalog.
+-- Cross-schema FKs to auth.users are omitted (see 00_supabase_stub.sql).
+-- Regenerate when the main app changes these tables.
 -- =============================================================================
-
-\set ON_ERROR_STOP 1
-SET client_min_messages = warning;
-
-
--- -----------------------------------------------------------------------------
--- Organizer side (main Illuxus app)
--- -----------------------------------------------------------------------------
-CREATE TABLE public.profiles (
-  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id             uuid NOT NULL UNIQUE REFERENCES auth.users (id) ON DELETE CASCADE,
-  display_name        text,
-  first_name          text,
-  last_name           text,
-  avatar_url          text,
-  mobile_country_code text,
-  mobile_number       text,
-  created_at          timestamptz NOT NULL DEFAULT now(),
-  updated_at          timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE public.organizations (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  name       text NOT NULL,
-  owner_id   uuid REFERENCES auth.users (id) ON DELETE SET NULL,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE public.org_members (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id     uuid NOT NULL REFERENCES public.organizations (id) ON DELETE CASCADE,
-  user_id    uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
-  role       text NOT NULL DEFAULT 'member'
-             CHECK (role IN ('owner', 'admin', 'member')),
-  created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (org_id, user_id)
-);
-
--- Types match vendor_venue_requests() (109): date/end_date timestamptz,
--- capacity int, the rest text.
-CREATE TABLE public.events (
-  id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id               uuid REFERENCES public.organizations (id) ON DELETE CASCADE,
-  user_id              uuid REFERENCES auth.users (id) ON DELETE SET NULL,
-  title                text NOT NULL,
-  description          text,
-  date                 timestamptz,
-  end_date             timestamptz,
-  timezone             text,
-  location             text,
-  venue                text,
-  capacity             integer,
-  event_format         text,
-  status               text NOT NULL DEFAULT 'draft'
-                       CHECK (status IN ('draft', 'published', 'cancelled', 'completed')),
-  banner_landscape_url text,
-  banner_portrait_url  text,
-  image_url            text,
-  created_at           timestamptz NOT NULL DEFAULT now(),
-  updated_at           timestamptz NOT NULL DEFAULT now(),
-  CHECK (end_date IS NULL OR date IS NULL OR end_date >= date)
-);
-
-
--- -----------------------------------------------------------------------------
--- Vendor identity + taxonomy
--- -----------------------------------------------------------------------------
--- Column list from types.ts (vendors Row). Return types of
--- get_marketplace_vendors() (100) pin rating_avg numeric, rating_count int,
--- response_time_hours int.
-CREATE TABLE public.vendors (
-  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  business_name       text NOT NULL,
-  tagline             text,
-  bio                 text,
-  website             text,
-  city                text,
-  country             text,
-  logo_url            text,
-  cover_url           text,
-  years_experience    integer CHECK (years_experience IS NULL OR years_experience >= 0),
-  response_time_hours integer CHECK (response_time_hours IS NULL OR response_time_hours >= 0),
-  socials             jsonb DEFAULT '{}'::jsonb,
-  notify_email        boolean NOT NULL DEFAULT true,
-  auto_reply          text,
-  default_currency    text NOT NULL DEFAULT 'USD',
-  rating_avg          numeric(3,2) DEFAULT 0,
-  rating_count        integer NOT NULL DEFAULT 0,
-  verification_status text NOT NULL DEFAULT 'unverified'
-                      CHECK (verification_status IN ('unverified', 'pending', 'verified', 'rejected')),
-  commission_rate     numeric(5,2) NOT NULL DEFAULT 10.00
-                      CHECK (commission_rate >= 0 AND commission_rate <= 100),
-  created_at          timestamptz NOT NULL DEFAULT now(),
-  updated_at          timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE public.vendor_members (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  vendor_id  uuid NOT NULL REFERENCES public.vendors (id) ON DELETE CASCADE,
-  user_id    uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
-  role       text NOT NULL DEFAULT 'staff'
-             CHECK (role IN ('owner', 'manager', 'staff')),
-  created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (vendor_id, user_id)
-);
-
--- 104 does INSERT ... (slug, name, icon) ON CONFLICT (slug).
-CREATE TABLE public.vendor_categories (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  slug       text NOT NULL UNIQUE,
-  name       text NOT NULL,
-  icon       text,
-  sort_order integer NOT NULL DEFAULT 0,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE public.vendor_category_map (
-  vendor_id   uuid NOT NULL REFERENCES public.vendors (id) ON DELETE CASCADE,
-  category_id uuid NOT NULL REFERENCES public.vendor_categories (id) ON DELETE CASCADE,
-  created_at  timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (vendor_id, category_id)
-);
-
-
--- -----------------------------------------------------------------------------
--- Rate card / portfolio / areas
--- -----------------------------------------------------------------------------
--- 108 adds venue_id + category.
-CREATE TABLE public.vendor_services (
-  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  vendor_id        uuid NOT NULL REFERENCES public.vendors (id) ON DELETE CASCADE,
-  title            text NOT NULL,
-  description      text,
-  base_price       bigint NOT NULL DEFAULT 0 CHECK (base_price >= 0),   -- minor units
-  currency         text NOT NULL DEFAULT 'USD',
-  unit             text NOT NULL DEFAULT 'per_event'
-                   CHECK (unit IN ('per_hour', 'per_event', 'per_person', 'per_day', 'flat')),
-  duration         text,
-  is_instant_book  boolean NOT NULL DEFAULT false,
-  quote_on_request boolean NOT NULL DEFAULT false,
-  is_active        boolean NOT NULL DEFAULT true,
-  sort_order       integer NOT NULL DEFAULT 0,
-  created_at       timestamptz NOT NULL DEFAULT now(),
-  updated_at       timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE public.vendor_service_addons (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  service_id  uuid NOT NULL REFERENCES public.vendor_services (id) ON DELETE CASCADE,
-  title       text NOT NULL,
-  description text,
-  price       bigint NOT NULL DEFAULT 0 CHECK (price >= 0),   -- minor units
-  created_at  timestamptz NOT NULL DEFAULT now()
-);
-
--- Shape unknown in this repo (usePublicProfile picks city/area/name/...).
-CREATE TABLE public.vendor_service_areas (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  vendor_id  uuid NOT NULL REFERENCES public.vendors (id) ON DELETE CASCADE,
-  city       text NOT NULL,
-  country    text,
-  radius_km  integer CHECK (radius_km IS NULL OR radius_km >= 0),
-  created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (vendor_id, city)
-);
-
-CREATE TABLE public.vendor_portfolio (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  vendor_id  uuid NOT NULL REFERENCES public.vendors (id) ON DELETE CASCADE,
-  url        text NOT NULL,
-  media_type text NOT NULL DEFAULT 'image' CHECK (media_type IN ('image', 'video')),
-  caption    text,
-  is_cover   boolean NOT NULL DEFAULT false,
-  sort_order integer NOT NULL DEFAULT 0,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-
--- -----------------------------------------------------------------------------
--- RFQ -> quote -> booking pipeline
--- -----------------------------------------------------------------------------
--- useInboxRfqs embeds vendor_categories from rfqs, so rfqs.category_id FK.
-CREATE TABLE public.rfqs (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id          uuid NOT NULL REFERENCES public.organizations (id) ON DELETE CASCADE,
-  event_id        uuid REFERENCES public.events (id) ON DELETE SET NULL,
-  category_id     uuid REFERENCES public.vendor_categories (id) ON DELETE SET NULL,
-  created_by      uuid REFERENCES auth.users (id) ON DELETE SET NULL,
-  requirements    text NOT NULL DEFAULT '',
-  event_city      text,
-  event_date      date,
-  expected_guests integer CHECK (expected_guests IS NULL OR expected_guests >= 0),
-  budget_min      bigint CHECK (budget_min IS NULL OR budget_min >= 0),   -- minor units
-  budget_max      bigint CHECK (budget_max IS NULL OR budget_max >= 0),
-  currency        text NOT NULL DEFAULT 'USD',
-  status          text NOT NULL DEFAULT 'open'
-                  CHECK (status IN ('open', 'quoted', 'accepted', 'expired', 'cancelled')),
-  created_at      timestamptz NOT NULL DEFAULT now(),
-  CHECK (budget_min IS NULL OR budget_max IS NULL OR budget_max >= budget_min)
-);
-
-CREATE TABLE public.rfq_invitees (
-  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  rfq_id       uuid NOT NULL REFERENCES public.rfqs (id) ON DELETE CASCADE,
-  vendor_id    uuid NOT NULL REFERENCES public.vendors (id) ON DELETE CASCADE,
-  invited_at   timestamptz NOT NULL DEFAULT now(),
-  responded_at timestamptz,
-  declined     boolean NOT NULL DEFAULT false,
-  UNIQUE (rfq_id, vendor_id)
-);
-
--- SendQuoteDialog relies on UNIQUE (rfq_id, vendor_id).
-CREATE TABLE public.quotes (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  rfq_id      uuid NOT NULL REFERENCES public.rfqs (id) ON DELETE CASCADE,
-  vendor_id   uuid NOT NULL REFERENCES public.vendors (id) ON DELETE CASCADE,
-  total       bigint NOT NULL CHECK (total >= 0),   -- minor units
-  currency    text NOT NULL DEFAULT 'USD',
-  valid_until date,
-  inclusions  text,
-  notes       text,
-  status      text NOT NULL DEFAULT 'draft'
-              CHECK (status IN ('draft', 'sent', 'accepted', 'declined', 'expired')),
-  created_at  timestamptz NOT NULL DEFAULT now(),
-  updated_at  timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (rfq_id, vendor_id)
-);
-
-CREATE TABLE public.quote_line_items (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  quote_id    uuid NOT NULL REFERENCES public.quotes (id) ON DELETE CASCADE,
-  description text NOT NULL,
-  quantity    numeric(10,2) NOT NULL DEFAULT 1 CHECK (quantity > 0),
-  unit_price  bigint NOT NULL DEFAULT 0 CHECK (unit_price >= 0),   -- minor units
-  amount      bigint NOT NULL DEFAULT 0 CHECK (amount >= 0),
-  sort_order  integer NOT NULL DEFAULT 0,
-  created_at  timestamptz NOT NULL DEFAULT now()
-);
-
--- Columns from accept_vendor_quote() (100) + useMyBookings.
-CREATE TABLE public.vendor_bookings (
-  id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  quote_id          uuid REFERENCES public.quotes (id) ON DELETE SET NULL,
-  rfq_id            uuid REFERENCES public.rfqs (id) ON DELETE SET NULL,
-  org_id            uuid NOT NULL REFERENCES public.organizations (id) ON DELETE CASCADE,
-  vendor_id         uuid NOT NULL REFERENCES public.vendors (id) ON DELETE CASCADE,
-  event_id          uuid REFERENCES public.events (id) ON DELETE SET NULL,
-  total             bigint NOT NULL DEFAULT 0 CHECK (total >= 0),   -- minor units
-  currency          text NOT NULL DEFAULT 'USD',
-  commission_rate   numeric(5,2) NOT NULL DEFAULT 10.00,
-  commission_amount bigint NOT NULL DEFAULT 0,
-  event_date        date,
-  status            text NOT NULL DEFAULT 'pending'
-                    CHECK (status IN ('pending', 'confirmed', 'in_progress', 'completed', 'cancelled')),
-  deposit_status    text NOT NULL DEFAULT 'pending'
-                    CHECK (deposit_status IN ('pending', 'received', 'refunded')),
-  created_at        timestamptz NOT NULL DEFAULT now(),
-  updated_at        timestamptz NOT NULL DEFAULT now()
-  -- one-booking-per-quote is added by migration 111, not assumed here
-);
-
-CREATE TABLE public.booking_milestones (
-  id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  booking_id   uuid NOT NULL REFERENCES public.vendor_bookings (id) ON DELETE CASCADE,
-  label        text NOT NULL,
-  amount       bigint NOT NULL DEFAULT 0 CHECK (amount >= 0),   -- minor units
-  due_date     date,
-  status       text NOT NULL DEFAULT 'pending'
-               CHECK (status IN ('pending', 'paid', 'completed', 'waived')),
-  sort_order   integer NOT NULL DEFAULT 0,
-  completed_at timestamptz,
-  created_at   timestamptz NOT NULL DEFAULT now()
-);
-
--- UNIQUE (vendor_id, date) is the Lovable baseline constraint that 108 swaps
--- for a venue-aware unique index. booking_id written by
--- vendor_bookings_sync_availability() (100). 108 adds venue_id.
-CREATE TABLE public.vendor_availability (
-  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  vendor_id  uuid NOT NULL REFERENCES public.vendors (id) ON DELETE CASCADE,
-  date       date NOT NULL,
-  status     text NOT NULL DEFAULT 'held'
-             CHECK (status IN ('available', 'held', 'booked')),
-  note       text,
-  booking_id uuid REFERENCES public.vendor_bookings (id) ON DELETE CASCADE,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (vendor_id, date)
-);
-
-
--- -----------------------------------------------------------------------------
--- Messaging
--- -----------------------------------------------------------------------------
-CREATE TABLE public.vendor_message_threads (
-  id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  org_id          uuid NOT NULL REFERENCES public.organizations (id) ON DELETE CASCADE,
-  vendor_id       uuid NOT NULL REFERENCES public.vendors (id) ON DELETE CASCADE,
-  rfq_id          uuid REFERENCES public.rfqs (id) ON DELETE SET NULL,
-  booking_id      uuid REFERENCES public.vendor_bookings (id) ON DELETE SET NULL,
-  last_message_at timestamptz,
-  created_at      timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE public.vendor_messages (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  thread_id   uuid NOT NULL REFERENCES public.vendor_message_threads (id) ON DELETE CASCADE,
-  sender_id   uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
-  sender_type text NOT NULL DEFAULT 'vendor' CHECK (sender_type IN ('organizer', 'vendor')),
-  body        text NOT NULL,
-  attachments jsonb NOT NULL DEFAULT '[]'::jsonb,
-  read_at     timestamptz,
-  created_at  timestamptz NOT NULL DEFAULT now()
-);
-
-
--- -----------------------------------------------------------------------------
--- Reviews -- no vendor_id column; reviews hang off bookings (see 100, 110).
--- -----------------------------------------------------------------------------
-CREATE TABLE public.vendor_reviews (
-  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  booking_id    uuid NOT NULL REFERENCES public.vendor_bookings (id) ON DELETE CASCADE,
-  reviewer_id   uuid NOT NULL REFERENCES auth.users (id) ON DELETE CASCADE,
-  reviewer_type text NOT NULL CHECK (reviewer_type IN ('organizer', 'vendor')),
-  rating        smallint NOT NULL CHECK (rating BETWEEN 1 AND 5),
-  comment       text,
-  created_at    timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (booking_id, reviewer_type)
-);
-
-
--- -----------------------------------------------------------------------------
--- Vendor email OTPs -- 101 widens the purpose CHECK to include 'login'.
--- -----------------------------------------------------------------------------
-CREATE TABLE public.vendor_email_otps (
-  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  email       text NOT NULL,
-  code_hash   text NOT NULL,
-  purpose     text NOT NULL,
-  attempts    integer NOT NULL DEFAULT 0,
-  expires_at  timestamptz NOT NULL,
-  consumed_at timestamptz,
-  created_at  timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT vendor_email_otps_purpose_check
-    CHECK (purpose = ANY (ARRAY['signup', 'reverify', 'password_reset']))
-);
-
-
--- -----------------------------------------------------------------------------
--- Organizer -> venue direct picks (main app marketplace).
--- -----------------------------------------------------------------------------
--- Column types match vendor_venue_requests() (109). venue_id is read by
--- 108/109 but added by no migration in this repo, so it is part of the base
--- schema here; it has no FK because public.venues is created later (106).
--- 109 adds response_notified_status.
-CREATE TABLE public.event_venue_selections (
-  id                      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  event_id                uuid NOT NULL REFERENCES public.events (id) ON DELETE CASCADE,
-  vendor_id               uuid NOT NULL REFERENCES public.vendors (id) ON DELETE CASCADE,
-  venue_id                uuid,
-  status                  text NOT NULL DEFAULT 'contacted'
-                          CHECK (status IN ('contacted', 'accepted', 'declined', 'cancelled')),
-  notes                   text,
-  selected_service_ids    uuid[] DEFAULT '{}'::uuid[],
-  event_type              text,
-  event_duration_hours    numeric(5,1) CHECK (event_duration_hours IS NULL OR event_duration_hours > 0),
-  expected_attendees      integer CHECK (expected_attendees IS NULL OR expected_attendees >= 0),
-  seating_capacity        integer CHECK (seating_capacity IS NULL OR seating_capacity >= 0),
-  seating_arrangement     text,
-  needs_pre_function_area boolean NOT NULL DEFAULT false,
-  needs_vip_area          boolean NOT NULL DEFAULT false,
-  needs_additional_rooms  boolean NOT NULL DEFAULT false,
-  venue_link              text,
-  responded_at            timestamptz,
-  created_at              timestamptz NOT NULL DEFAULT now(),
-  updated_at              timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX event_venue_selections_vendor_id_idx ON public.event_venue_selections (vendor_id);
-CREATE INDEX event_venue_selections_event_id_idx  ON public.event_venue_selections (event_id);
+create table public.booking_milestones (id uuid not null default gen_random_uuid(), booking_id uuid not null, label text not null, amount bigint not null, due_date date, status text not null default 'pending'::text, paid_at timestamp with time zone, sort_order integer not null default 0);
+create table public.event_venue_selections (id uuid not null default gen_random_uuid(), event_id uuid not null, vendor_id uuid not null, org_id uuid not null, selected_by uuid, status text not null default 'contacted'::text, notes text, notified_at timestamp with time zone, responded_at timestamp with time zone, created_at timestamp with time zone not null default now(), updated_at timestamp with time zone not null default now(), selected_service_ids uuid[] not null default ARRAY[]::uuid[], event_type text, event_duration_hours numeric(6,2), expected_attendees integer, seating_capacity integer, seating_arrangement text, needs_pre_function_area boolean not null default false, needs_vip_area boolean not null default false, needs_additional_rooms boolean not null default false, venue_link text, venue_id uuid, response_notified_status text);
+create table public.events (id uuid not null default gen_random_uuid(), user_id uuid not null, org_id uuid, title text not null, description text, slug text not null, date timestamp with time zone not null, end_date timestamp with time zone, venue text, location text, capacity integer default 0, tickets_sold integer default 0, price numeric(10,2) default 0, currency text not null default 'INR'::text, timezone text, status text not null default 'draft'::text, event_format text not null default 'physical'::text, virtual_provider text, virtual_url text, requires_approval boolean not null default false, cover_video_url text, image_url text, banner_landscape_url text, banner_portrait_url text, page_config jsonb, attendance_target_pct integer, webinar_branding_enabled boolean, created_at timestamp with time zone not null default now(), updated_at timestamp with time zone not null default now(), speaker_applications_enabled boolean not null default true, sponsor_applications_enabled boolean not null default true, create_community boolean not null default true, community_category text default 'other'::text, previous_event_id uuid, video_provider text, published boolean default false, deleted_at timestamp with time zone, ask_sponsor_consent boolean not null default false);
+create table public.org_members (id uuid not null default gen_random_uuid(), org_id uuid not null, user_id uuid not null, role text not null default 'member'::text, joined_at timestamp with time zone not null default now());
+create table public.organizations (id uuid not null default gen_random_uuid(), name text not null, slug text not null, subdomain text, custom_domain text, custom_domain_verified boolean not null default false, logo_url text, owner_id uuid not null, plan text not null default 'free'::text, plan_limits jsonb not null default '{"features": ["basic_analytics"], "max_events": 3, "max_team_members": 1, "max_attendees_per_event": 50}'::jsonb, addons text[] not null default '{}'::text[], billing_email text, landing_config jsonb not null default '{}'::jsonb, landing_published boolean not null default false, webinar_branding_enabled boolean not null default true, created_at timestamp with time zone not null default now(), updated_at timestamp with time zone not null default now(), feature_overrides jsonb not null default '{}'::jsonb);
+create table public.profiles (id uuid not null default gen_random_uuid(), user_id uuid not null, display_name text, avatar_url text, bio text, account_type text not null default 'attendee'::text, username text, headline text, title text, first_name text, last_name text, department text, designation text, company text, mobile_country_code text, mobile_number text, mobile_verified boolean not null default false, email_verified boolean not null default false, linkedin_url text, company_website text, company_employee_count text, industry text, city_id uuid, two_factor_enabled boolean not null default false, profile_completed boolean not null default false, onboarding_completed boolean not null default false, video_fx_prefs jsonb not null default '{}'::jsonb, created_at timestamp with time zone not null default now(), updated_at timestamp with time zone not null default now(), banned_at timestamp with time zone, banned_reason text, utm_source text, utm_medium text, utm_campaign text, utm_content text, utm_term text);
+create table public.quote_line_items (id uuid not null default gen_random_uuid(), quote_id uuid not null, description text not null, amount bigint not null, sort_order integer not null default 0);
+create table public.quotes (id uuid not null default gen_random_uuid(), rfq_id uuid not null, vendor_id uuid not null, total bigint not null, currency text not null default 'USD'::text, valid_until date not null, inclusions text, notes text, status text not null default 'draft'::text, created_at timestamp with time zone not null default now(), updated_at timestamp with time zone not null default now());
+create table public.rfq_invitees (id uuid not null default gen_random_uuid(), rfq_id uuid not null, vendor_id uuid not null, invited_at timestamp with time zone not null default now(), responded_at timestamp with time zone, declined boolean not null default false);
+create table public.rfqs (id uuid not null default gen_random_uuid(), org_id uuid not null, event_id uuid, category_id uuid, budget_min bigint, budget_max bigint, currency text not null default 'USD'::text, event_date date, event_city text, expected_guests integer, requirements text not null, status text not null default 'open'::text, expires_at timestamp with time zone, created_at timestamp with time zone not null default now());
+create table public.vendor_availability (id uuid not null default gen_random_uuid(), vendor_id uuid not null, date date not null, status text not null default 'available'::text, note text, booking_id uuid, venue_id uuid);
+create table public.vendor_bookings (id uuid not null default gen_random_uuid(), quote_id uuid, rfq_id uuid, org_id uuid not null, vendor_id uuid not null, event_id uuid, total bigint not null, currency text not null default 'USD'::text, commission_amount bigint not null default 0, commission_rate numeric(5,2) not null default 10.00, status text not null default 'pending'::text, contract_url text, deposit_status text not null default 'pending'::text, event_date date, created_at timestamp with time zone not null default now(), updated_at timestamp with time zone not null default now());
+create table public.vendor_categories (id uuid not null default gen_random_uuid(), name text not null, slug text not null, icon text, created_at timestamp with time zone not null default now());
+create table public.vendor_category_map (vendor_id uuid not null, category_id uuid not null);
+create table public.vendor_email_allowlist (email text not null, notes text, created_at timestamp with time zone not null default now());
+create table public.vendor_email_otps (id uuid not null default gen_random_uuid(), email text not null, code_hash text not null, purpose text not null default 'signup'::text, attempts integer not null default 0, max_attempts integer not null default 5, expires_at timestamp with time zone not null, consumed_at timestamp with time zone, created_at timestamp with time zone not null default now(), ip_hash text);
+create table public.vendor_members (id uuid not null default gen_random_uuid(), user_id uuid not null, vendor_id uuid not null, role text not null default 'owner'::text, created_at timestamp with time zone not null default now());
+create table public.vendor_message_threads (id uuid not null default gen_random_uuid(), rfq_id uuid, booking_id uuid, org_id uuid not null, vendor_id uuid not null, created_at timestamp with time zone not null default now(), last_message_at timestamp with time zone);
+create table public.vendor_messages (id uuid not null default gen_random_uuid(), thread_id uuid not null, sender_id uuid not null, body text not null, attachments jsonb default '[]'::jsonb, created_at timestamp with time zone not null default now());
+create table public.vendor_portfolio (id uuid not null default gen_random_uuid(), vendor_id uuid not null, url text not null, caption text, sort_order integer not null default 0, is_cover boolean not null default false, media_type text not null default 'image'::text, created_at timestamp with time zone not null default now());
+create table public.vendor_reviews (id uuid not null default gen_random_uuid(), booking_id uuid not null, reviewer_id uuid not null, reviewer_type text not null, rating integer not null, comment text, created_at timestamp with time zone not null default now());
+create table public.vendor_service_addons (id uuid not null default gen_random_uuid(), service_id uuid not null, name text not null, price bigint not null default 0, is_optional boolean not null default true);
+create table public.vendor_service_areas (id uuid not null default gen_random_uuid(), vendor_id uuid not null, city text not null, country text not null, radius_km integer);
+create table public.vendor_services (id uuid not null default gen_random_uuid(), vendor_id uuid not null, title text not null, description text, base_price bigint not null default 0, currency text not null default 'USD'::text, unit text not null default 'per_event'::text, duration text, is_instant_book boolean not null default false, quote_on_request boolean not null default true, is_active boolean not null default true, created_at timestamp with time zone not null default now(), venue_id uuid, category text);
+create table public.vendors (id uuid not null default gen_random_uuid(), business_name text not null, tagline text, bio text, website text, city text, country text, logo_url text, cover_url text, years_experience integer, response_time_hours integer, socials jsonb default '{}'::jsonb, notify_email boolean not null default true, auto_reply text, default_currency text not null default 'USD'::text, rating_avg numeric(3,2), rating_count integer not null default 0, verification_status text not null default 'unverified'::text, kyc_submitted_at timestamp with time zone, kyc_verified_at timestamp with time zone, commission_rate numeric(5,2) not null default 10.00, created_at timestamp with time zone not null default now(), updated_at timestamp with time zone not null default now(), bank_name text, bank_account_number text, bank_routing text, bank_country text, tax_id text);
+create table public.venue_media (id uuid not null default gen_random_uuid(), venue_id uuid not null, url text not null, caption text, media_kind text not null default 'empty_hall'::text, is_cover boolean not null default false, sort_order integer not null default 0, created_at timestamp with time zone not null default now());
+create table public.venues (id uuid not null default gen_random_uuid(), vendor_id uuid not null, name text not null, space_type text, description text, is_active boolean not null default true, area_sqft integer, length_ft numeric(6,1), width_ft numeric(6,1), ceiling_height_ft numeric(4,1), capacity_floating integer, capacity_theater integer, capacity_banquet integer, capacity_ushape integer, capacity_classroom integer, climate_control text, has_stage boolean not null default false, stage_dimensions text, green_rooms_count integer, has_projector boolean not null default false, has_screen boolean not null default false, has_sound_system boolean not null default false, has_microphones boolean not null default false, has_power_backup boolean not null default false, has_wifi boolean not null default false, catering_policy text, decor_policy text, alcohol_policy text, music_curfew_time time without time zone, noise_restrictions text, parking_car_capacity integer, parking_two_wheeler_capacity integer, has_valet boolean not null default false, wheelchair_accessible boolean not null default false, has_elevator boolean not null default false, created_at timestamp with time zone not null default now(), updated_at timestamp with time zone not null default now(), address_line text, city text, state text, pincode text, map_url text);
+alter table public.booking_milestones add constraint booking_milestones_pkey PRIMARY KEY (id);
+alter table public.event_venue_selections add constraint event_venue_selections_pkey PRIMARY KEY (id);
+alter table public.events add constraint events_pkey PRIMARY KEY (id);
+alter table public.org_members add constraint org_members_pkey PRIMARY KEY (id);
+alter table public.organizations add constraint organizations_pkey PRIMARY KEY (id);
+alter table public.profiles add constraint profiles_pkey PRIMARY KEY (id);
+alter table public.quote_line_items add constraint quote_line_items_pkey PRIMARY KEY (id);
+alter table public.quotes add constraint quotes_pkey PRIMARY KEY (id);
+alter table public.rfq_invitees add constraint rfq_invitees_pkey PRIMARY KEY (id);
+alter table public.rfqs add constraint rfqs_pkey PRIMARY KEY (id);
+alter table public.vendor_availability add constraint vendor_availability_pkey PRIMARY KEY (id);
+alter table public.vendor_bookings add constraint vendor_bookings_pkey PRIMARY KEY (id);
+alter table public.vendor_categories add constraint vendor_categories_pkey PRIMARY KEY (id);
+alter table public.vendor_category_map add constraint vendor_category_map_pkey PRIMARY KEY (vendor_id, category_id);
+alter table public.vendor_email_allowlist add constraint vendor_email_allowlist_pkey PRIMARY KEY (email);
+alter table public.vendor_email_otps add constraint vendor_email_otps_pkey PRIMARY KEY (id);
+alter table public.vendor_members add constraint vendor_members_pkey PRIMARY KEY (id);
+alter table public.vendor_message_threads add constraint vendor_message_threads_pkey PRIMARY KEY (id);
+alter table public.vendor_messages add constraint vendor_messages_pkey PRIMARY KEY (id);
+alter table public.vendor_portfolio add constraint vendor_portfolio_pkey PRIMARY KEY (id);
+alter table public.vendor_reviews add constraint vendor_reviews_pkey PRIMARY KEY (id);
+alter table public.vendor_service_addons add constraint vendor_service_addons_pkey PRIMARY KEY (id);
+alter table public.vendor_service_areas add constraint vendor_service_areas_pkey PRIMARY KEY (id);
+alter table public.vendor_services add constraint vendor_services_pkey PRIMARY KEY (id);
+alter table public.vendors add constraint vendors_pkey PRIMARY KEY (id);
+alter table public.venue_media add constraint venue_media_pkey PRIMARY KEY (id);
+alter table public.venues add constraint venues_pkey PRIMARY KEY (id);
+alter table public.event_venue_selections add constraint event_venue_selections_event_id_vendor_id_key UNIQUE (event_id, vendor_id);
+alter table public.org_members add constraint org_members_org_id_user_id_key UNIQUE (org_id, user_id);
+alter table public.organizations add constraint organizations_slug_key UNIQUE (slug);
+alter table public.profiles add constraint profiles_user_id_key UNIQUE (user_id);
+alter table public.rfq_invitees add constraint rfq_invitees_rfq_id_vendor_id_key UNIQUE (rfq_id, vendor_id);
+alter table public.vendor_categories add constraint vendor_categories_name_key UNIQUE (name);
+alter table public.vendor_categories add constraint vendor_categories_slug_key UNIQUE (slug);
+alter table public.vendor_members add constraint vendor_members_user_id_vendor_id_key UNIQUE (user_id, vendor_id);
+alter table public.vendor_reviews add constraint vendor_reviews_booking_id_reviewer_id_key UNIQUE (booking_id, reviewer_id);
+alter table public.booking_milestones add constraint booking_milestones_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'invoiced'::text, 'paid'::text, 'overdue'::text])));
+alter table public.event_venue_selections add constraint event_venue_selections_event_type_length CHECK (((event_type IS NULL) OR (length(event_type) <= 60)));
+alter table public.event_venue_selections add constraint event_venue_selections_seating_arrangement_length CHECK (((seating_arrangement IS NULL) OR (length(seating_arrangement) <= 60)));
+alter table public.event_venue_selections add constraint event_venue_selections_status_check CHECK ((status = ANY (ARRAY['contacted'::text, 'accepted'::text, 'declined'::text, 'cancelled'::text])));
+alter table public.event_venue_selections add constraint event_venue_selections_venue_link_length CHECK (((venue_link IS NULL) OR (length(venue_link) <= 500)));
+alter table public.events add constraint events_attendance_target_pct_check CHECK (((attendance_target_pct IS NULL) OR ((attendance_target_pct >= 0) AND (attendance_target_pct <= 100))));
+alter table public.events add constraint events_event_format_check CHECK ((event_format = ANY (ARRAY['physical'::text, 'virtual'::text, 'hybrid'::text])));
+alter table public.events add constraint events_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'published'::text, 'cancelled'::text, 'completed'::text])));
+alter table public.events add constraint events_video_provider_check CHECK (((video_provider IS NULL) OR (video_provider = ANY (ARRAY['livekit'::text, 'agora'::text]))));
+alter table public.profiles add constraint profiles_account_type_check CHECK ((account_type = ANY (ARRAY['attendee'::text, 'organizer'::text])));
+alter table public.quotes add constraint quotes_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'sent'::text, 'accepted'::text, 'declined'::text, 'expired'::text])));
+alter table public.rfqs add constraint rfqs_status_check CHECK ((status = ANY (ARRAY['open'::text, 'quoted'::text, 'accepted'::text, 'expired'::text, 'cancelled'::text])));
+alter table public.vendor_availability add constraint vendor_availability_status_check CHECK ((status = ANY (ARRAY['available'::text, 'held'::text, 'booked'::text])));
+alter table public.vendor_bookings add constraint vendor_bookings_deposit_status_check CHECK ((deposit_status = ANY (ARRAY['pending'::text, 'received'::text, 'refunded'::text])));
+alter table public.vendor_bookings add constraint vendor_bookings_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'confirmed'::text, 'in_progress'::text, 'completed'::text, 'cancelled'::text])));
+alter table public.vendor_email_otps add constraint vendor_email_otps_purpose_check CHECK ((purpose = ANY (ARRAY['signup'::text, 'login'::text, 'reverify'::text, 'password_reset'::text])));
+alter table public.vendor_members add constraint vendor_members_role_check CHECK ((role = ANY (ARRAY['owner'::text, 'manager'::text, 'staff'::text])));
+alter table public.vendor_portfolio add constraint vendor_portfolio_media_type_check CHECK ((media_type = ANY (ARRAY['image'::text, 'video'::text])));
+alter table public.vendor_reviews add constraint vendor_reviews_rating_check CHECK (((rating >= 1) AND (rating <= 5)));
+alter table public.vendor_reviews add constraint vendor_reviews_reviewer_type_check CHECK ((reviewer_type = ANY (ARRAY['organizer'::text, 'vendor'::text])));
+alter table public.vendor_services add constraint vendor_services_category_length CHECK (((category IS NULL) OR (length(category) <= 40)));
+alter table public.vendor_services add constraint vendor_services_unit_check CHECK ((unit = ANY (ARRAY['per_hour'::text, 'per_event'::text, 'per_person'::text, 'per_day'::text, 'flat'::text])));
+alter table public.vendors add constraint vendors_commission_rate_check CHECK (((commission_rate >= (5)::numeric) AND (commission_rate <= (15)::numeric)));
+alter table public.vendors add constraint vendors_verification_status_check CHECK ((verification_status = ANY (ARRAY['unverified'::text, 'pending'::text, 'verified'::text, 'rejected'::text])));
+alter table public.venue_media add constraint venue_media_kind_check CHECK ((media_kind = ANY (ARRAY['empty_hall'::text, 'setup'::text, 'facility'::text, 'floor_plan'::text, 'video'::text, 'other'::text])));
+alter table public.venues add constraint venues_alcohol_policy_check CHECK (((alcohol_policy IS NULL) OR (alcohol_policy = ANY (ARRAY['in_house_only'::text, 'outside_with_license'::text, 'prohibited'::text, 'both'::text]))));
+alter table public.venues add constraint venues_catering_policy_check CHECK (((catering_policy IS NULL) OR (catering_policy = ANY (ARRAY['in_house_only'::text, 'outside_permitted'::text, 'both'::text]))));
+alter table public.venues add constraint venues_climate_control_check CHECK (((climate_control IS NULL) OR (climate_control = ANY (ARRAY['central_ac'::text, 'split_ac'::text, 'non_ac'::text]))));
+alter table public.venues add constraint venues_decor_policy_check CHECK (((decor_policy IS NULL) OR (decor_policy = ANY (ARRAY['empanelled_only'::text, 'client_choice'::text, 'both'::text]))));
+alter table public.venues add constraint venues_location_lengths CHECK ((((address_line IS NULL) OR (length(address_line) <= 300)) AND ((city IS NULL) OR (length(city) <= 80)) AND ((state IS NULL) OR (length(state) <= 80)) AND ((pincode IS NULL) OR (length(pincode) <= 12)) AND ((map_url IS NULL) OR (length(map_url) <= 500))));
+alter table public.venues add constraint venues_name_length CHECK (((length(name) >= 1) AND (length(name) <= 120)));
+alter table public.venues add constraint venues_space_type_length CHECK (((space_type IS NULL) OR (length(space_type) <= 60)));
+alter table public.booking_milestones add constraint booking_milestones_booking_id_fkey FOREIGN KEY (booking_id) REFERENCES vendor_bookings(id) ON DELETE CASCADE;
+alter table public.event_venue_selections add constraint event_venue_selections_event_id_fkey FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE;
+alter table public.event_venue_selections add constraint event_venue_selections_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE;
+alter table public.event_venue_selections add constraint event_venue_selections_venue_id_fkey FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE SET NULL;
+alter table public.events add constraint events_org_id_fkey FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE SET NULL;
+alter table public.events add constraint events_previous_event_id_fkey FOREIGN KEY (previous_event_id) REFERENCES events(id) ON DELETE SET NULL;
+alter table public.org_members add constraint org_members_org_id_fkey FOREIGN KEY (org_id) REFERENCES organizations(id) ON DELETE CASCADE;
+alter table public.quote_line_items add constraint quote_line_items_quote_id_fkey FOREIGN KEY (quote_id) REFERENCES quotes(id) ON DELETE CASCADE;
+alter table public.quotes add constraint quotes_rfq_id_fkey FOREIGN KEY (rfq_id) REFERENCES rfqs(id) ON DELETE CASCADE;
+alter table public.quotes add constraint quotes_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE;
+alter table public.rfq_invitees add constraint rfq_invitees_rfq_id_fkey FOREIGN KEY (rfq_id) REFERENCES rfqs(id) ON DELETE CASCADE;
+alter table public.rfq_invitees add constraint rfq_invitees_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE;
+alter table public.rfqs add constraint rfqs_category_id_fkey FOREIGN KEY (category_id) REFERENCES vendor_categories(id);
+alter table public.vendor_availability add constraint vendor_availability_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE;
+alter table public.vendor_availability add constraint vendor_availability_venue_id_fkey FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE CASCADE;
+alter table public.vendor_bookings add constraint vendor_bookings_quote_id_fkey FOREIGN KEY (quote_id) REFERENCES quotes(id);
+alter table public.vendor_bookings add constraint vendor_bookings_rfq_id_fkey FOREIGN KEY (rfq_id) REFERENCES rfqs(id);
+alter table public.vendor_bookings add constraint vendor_bookings_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE;
+alter table public.vendor_category_map add constraint vendor_category_map_category_id_fkey FOREIGN KEY (category_id) REFERENCES vendor_categories(id) ON DELETE CASCADE;
+alter table public.vendor_category_map add constraint vendor_category_map_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE;
+alter table public.vendor_members add constraint vendor_members_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE;
+alter table public.vendor_message_threads add constraint vendor_message_threads_booking_id_fkey FOREIGN KEY (booking_id) REFERENCES vendor_bookings(id);
+alter table public.vendor_message_threads add constraint vendor_message_threads_rfq_id_fkey FOREIGN KEY (rfq_id) REFERENCES rfqs(id);
+alter table public.vendor_message_threads add constraint vendor_message_threads_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE;
+alter table public.vendor_messages add constraint vendor_messages_thread_id_fkey FOREIGN KEY (thread_id) REFERENCES vendor_message_threads(id) ON DELETE CASCADE;
+alter table public.vendor_portfolio add constraint vendor_portfolio_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE;
+alter table public.vendor_reviews add constraint vendor_reviews_booking_id_fkey FOREIGN KEY (booking_id) REFERENCES vendor_bookings(id) ON DELETE CASCADE;
+alter table public.vendor_service_addons add constraint vendor_service_addons_service_id_fkey FOREIGN KEY (service_id) REFERENCES vendor_services(id) ON DELETE CASCADE;
+alter table public.vendor_service_areas add constraint vendor_service_areas_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE;
+alter table public.vendor_services add constraint vendor_services_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE;
+alter table public.vendor_services add constraint vendor_services_venue_id_fkey FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE CASCADE;
+alter table public.venue_media add constraint venue_media_venue_id_fkey FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE CASCADE;
+alter table public.venues add constraint venues_vendor_id_fkey FOREIGN KEY (vendor_id) REFERENCES vendors(id) ON DELETE CASCADE;
+CREATE INDEX booking_milestones_booking_id_fkey_idx ON public.booking_milestones USING btree (booking_id);
+CREATE INDEX event_venue_selections_selected_by_fkey_idx ON public.event_venue_selections USING btree (selected_by);
+CREATE INDEX event_venue_selections_venue_id_idx ON public.event_venue_selections USING btree (venue_id);
+CREATE INDEX idx_event_venue_selections_event ON public.event_venue_selections USING btree (event_id);
+CREATE INDEX idx_event_venue_selections_org ON public.event_venue_selections USING btree (org_id);
+CREATE INDEX idx_event_venue_selections_vendor ON public.event_venue_selections USING btree (vendor_id);
+CREATE INDEX events_previous_event_idx ON public.events USING btree (previous_event_id) WHERE (previous_event_id IS NOT NULL);
+CREATE INDEX events_slug_idx ON public.events USING btree (slug);
+CREATE INDEX idx_events_org_date ON public.events USING btree (org_id, date DESC);
+CREATE INDEX idx_events_org_id ON public.events USING btree (org_id);
+CREATE INDEX idx_events_status_date ON public.events USING btree (status, date DESC);
+CREATE INDEX idx_events_user_id ON public.events USING btree (user_id);
+CREATE UNIQUE INDEX events_slug_org_unique ON public.events USING btree (org_id, slug);
+CREATE INDEX idx_org_members_org_id ON public.org_members USING btree (org_id);
+CREATE INDEX idx_org_members_user_id ON public.org_members USING btree (user_id);
+CREATE UNIQUE INDEX organizations_custom_domain_unique ON public.organizations USING btree (lower(custom_domain)) WHERE (custom_domain IS NOT NULL);
+CREATE UNIQUE INDEX organizations_subdomain_unique ON public.organizations USING btree (lower(subdomain)) WHERE (subdomain IS NOT NULL);
+CREATE INDEX idx_profiles_account_type ON public.profiles USING btree (account_type);
+CREATE UNIQUE INDEX profiles_username_unique ON public.profiles USING btree (lower(username)) WHERE (username IS NOT NULL);
+CREATE INDEX quote_line_items_quote_id_fkey_idx ON public.quote_line_items USING btree (quote_id);
+CREATE INDEX idx_quotes_rfq ON public.quotes USING btree (rfq_id);
+CREATE INDEX idx_quotes_vendor ON public.quotes USING btree (vendor_id);
+CREATE INDEX idx_rfq_invitees_vendor ON public.rfq_invitees USING btree (vendor_id);
+CREATE INDEX rfqs_category_id_fkey_idx ON public.rfqs USING btree (category_id);
+CREATE INDEX idx_vendor_availability_vendor_date ON public.vendor_availability USING btree (vendor_id, date);
+CREATE INDEX vendor_availability_venue_id_fkey_idx ON public.vendor_availability USING btree (venue_id);
+CREATE UNIQUE INDEX vendor_availability_vendor_date_venue_uniq ON public.vendor_availability USING btree (vendor_id, date, COALESCE(venue_id, '00000000-0000-0000-0000-000000000000'::uuid));
+CREATE INDEX idx_vendor_bookings_org ON public.vendor_bookings USING btree (org_id);
+CREATE INDEX idx_vendor_bookings_vendor ON public.vendor_bookings USING btree (vendor_id);
+CREATE INDEX vendor_bookings_quote_id_fkey_idx ON public.vendor_bookings USING btree (quote_id);
+CREATE INDEX vendor_bookings_rfq_id_fkey_idx ON public.vendor_bookings USING btree (rfq_id);
+CREATE INDEX vendor_category_map_category_id_fkey_idx ON public.vendor_category_map USING btree (category_id);
+CREATE INDEX idx_vendor_email_otps_email ON public.vendor_email_otps USING btree (lower(email));
+CREATE INDEX idx_vendor_email_otps_expires ON public.vendor_email_otps USING btree (expires_at);
+CREATE INDEX idx_vendor_email_otps_lookup ON public.vendor_email_otps USING btree (email, purpose, created_at DESC) WHERE (consumed_at IS NULL);
+CREATE INDEX idx_vendor_members_user ON public.vendor_members USING btree (user_id);
+CREATE INDEX idx_vendor_members_vendor ON public.vendor_members USING btree (vendor_id);
+CREATE INDEX vendor_message_threads_booking_id_fkey_idx ON public.vendor_message_threads USING btree (booking_id);
+CREATE INDEX vendor_message_threads_rfq_id_fkey_idx ON public.vendor_message_threads USING btree (rfq_id);
+CREATE INDEX vendor_message_threads_vendor_id_fkey_idx ON public.vendor_message_threads USING btree (vendor_id);
+CREATE INDEX idx_vendor_messages_thread ON public.vendor_messages USING btree (thread_id);
+CREATE INDEX vendor_messages_sender_id_fkey_idx ON public.vendor_messages USING btree (sender_id);
+CREATE INDEX vendor_portfolio_vendor_id_fkey_idx ON public.vendor_portfolio USING btree (vendor_id);
+CREATE INDEX idx_vendor_reviews_booking ON public.vendor_reviews USING btree (booking_id);
+CREATE INDEX vendor_reviews_reviewer_id_fkey_idx ON public.vendor_reviews USING btree (reviewer_id);
+CREATE INDEX vendor_service_addons_service_id_fkey_idx ON public.vendor_service_addons USING btree (service_id);
+CREATE INDEX vendor_service_areas_vendor_id_fkey_idx ON public.vendor_service_areas USING btree (vendor_id);
+CREATE INDEX idx_vendor_services_vendor ON public.vendor_services USING btree (vendor_id);
+CREATE INDEX vendor_services_venue_id_idx ON public.vendor_services USING btree (venue_id);
+CREATE INDEX venue_media_venue_id_idx ON public.venue_media USING btree (venue_id);
+CREATE INDEX venues_city_lower_idx ON public.venues USING btree (lower(city));
+CREATE INDEX venues_is_active_idx ON public.venues USING btree (is_active);
+CREATE INDEX venues_vendor_id_idx ON public.venues USING btree (vendor_id);

@@ -124,9 +124,18 @@ export async function makeVendor(h: Harness, name = "Test Venues") {
 /** An organizer with an org + event, for inbox / booking fixtures. */
 export async function makeOrganizer(h: Harness) {
   const user = await makeUser(h);
-  const org = await h.db.organizations.create({ data: { name: "Acme Events", owner_id: user.id } });
+  const tag = randomUUID().slice(0, 8);
+  const org = await h.db.organizations.create({ data: { name: "Acme Events", slug: `acme-${tag}`, owner_id: user.id } });
   const event = await h.db.events.create({
-    data: { title: "Launch Night", org_id: org.id, user_id: user.id, location: "Mumbai", date: new Date("2027-02-10T12:00:00Z") },
+    data: {
+      title: "Launch Night",
+      slug: `launch-${tag}`,
+      org_id: org.id,
+      user_id: user.id,
+      location: "Mumbai",
+      date: new Date("2027-02-10T12:00:00Z"),
+      event_format: "physical",
+    },
   });
   await h.db.profiles.create({ data: { user_id: user.id, display_name: "Priya Planner", mobile_country_code: "+91", mobile_number: "9800000000" } });
   return { user, org, event };

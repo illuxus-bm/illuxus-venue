@@ -568,6 +568,12 @@ begin
     ) as t(tbl, name, cols)
   loop
     if to_regclass('public.' || ix.tbl) is not null
+       -- skip when an index on exactly these leading columns already exists
+       and not exists (
+         select 1 from pg_indexes p
+          where p.schemaname = 'public' and p.tablename = ix.tbl
+            and p.indexdef like '%(' || ix.cols || ')%'
+       )
        and (
          -- every listed column exists
          select bool_and(exists (
