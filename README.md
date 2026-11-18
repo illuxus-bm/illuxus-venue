@@ -8,13 +8,24 @@ app; both apps share one Supabase backend.
 It ships as a **web app / installable PWA** (Vercel) and as **native Android
 and iOS apps** (Capacitor), all from the same codebase.
 
+> **Branch `master`:** the apps no longer talk to Supabase directly. They call
+> the **Illuxus Venues API** (`server/`, Fastify + Prisma 7), which runs
+> against **Supabase Postgres or AWS RDS/Aurora**, with Supabase Auth or
+> built-in auth, and Supabase Storage or S3. See
+> [docs/PRISMA_MIGRATION.md](docs/PRISMA_MIGRATION.md) and the endpoint
+> contract in [docs/API.md](docs/API.md).
+
 ## Getting started
 
 ```sh
-npm ci
-cp .env.example .env        # paste values from the shared Supabase project
-npm run dev                 # http://localhost:8081
+npm ci                      # also generates the Prisma client
+cp .env.example .env        # web app settings (VITE_*)
+# API settings: see server/.env.example (same .env file works for both)
+npm run api:dev             # API on http://localhost:8787
+npm run dev                 # web on http://localhost:8081 (proxies /api)
 ```
+
+Or run Postgres + S3 (MinIO) + the API in containers: `docker compose up --build`.
 
 Requires Node 22+. See `.env.example` for every variable.
 
@@ -22,7 +33,11 @@ Requires Node 22+. See `.env.example` for every variable.
 
 | Script | What it does |
 | --- | --- |
-| `npm run dev` | Vite dev server on :8081 |
+| `npm run dev` | Vite dev server on :8081 (proxies `/api` → :8787) |
+| `npm run api:dev` / `api:build` / `api:start` | API server (watch / compile / run compiled) |
+| `npm run test:api` | API integration tests on Postgres (`TEST_PG_URL`, `TEST_DB_FLAVOR=aws\|supabase`) |
+| `npm run db:deploy` / `db:status` / `db:baseline` / `db:pull` | Prisma migrations (uses `DIRECT_URL`) |
+| `npm run user:create` | Invite a portal user (self-hosted auth) |
 | `npm run check` | lint + typecheck + unit tests + production build (what CI runs) |
 | `npm run lint` | ESLint, zero warnings allowed |
 | `npm run typecheck` | `tsc` over app and config sources |
@@ -48,8 +63,8 @@ Requires Node 22+. See `.env.example` for every variable.
 ## Architecture
 
 - **Stack:** Vite + React 18 + TypeScript, Tailwind + shadcn/ui, TanStack
-  Query, react-hook-form + zod, Supabase (auth, Postgres, storage, realtime),
-  Capacitor 8 for Android / iOS.
+  Query, react-hook-form + zod, Capacitor 8 for Android / iOS. API: Fastify 5
+  + Prisma 7 (pg driver adapter) + zod, S3-compatible storage, SMTP email.
 - **Routes are code-split**; vendor libraries are split into long-cacheable
   chunks.
 - **Security is enforced in the database.** RLS, column guards and storage
