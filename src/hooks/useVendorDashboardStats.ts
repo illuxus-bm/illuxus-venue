@@ -33,9 +33,10 @@ export function useVendorDashboardStats() {
       if (!vendorId) throw new Error("no vendor");
 
       const now = new Date();
-      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-        .toISOString()
-        .slice(0, 10);
+      // Full instant of local midnight on the 1st. Slicing to a date string
+      // would shift the bound by the UTC offset (e.g. IST includes 18.5h of
+      // the previous month).
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
 
       const [openRfqs, pendingQuotes, bookings, revenueRows] = await Promise.all([
         // Open RFQs = invited to this vendor, not declined, not yet responded, rfq still open.
@@ -71,8 +72,12 @@ export function useVendorDashboardStats() {
           .select("total, currency, updated_at")
           .eq("vendor_id", vendorId)
           .eq("status", "completed")
+          .eq("currency", currency)
           .gte("updated_at", monthStart),
       ]);
+
+      const failed = [openRfqs, pendingQuotes, bookings, revenueRows].find((r) => r.error);
+      if (failed) throw failed.error;
 
       const revenueThisMonth = (revenueRows.data ?? []).reduce(
         (sum: number, row: { total: number | string | null }) =>

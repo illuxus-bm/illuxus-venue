@@ -20,6 +20,7 @@ import { useVendorDashboardStats } from "@/hooks/useVendorDashboardStats";
 import { useMyReviews } from "@/hooks/useMyReviews";
 import { useMyBookings } from "@/hooks/useMyBookings";
 import { formatMoneyCents } from "@/lib/utils";
+import { todayDateOnly } from "@/lib/dates";
 
 interface OverviewTabProps {
   /** Switch to another dashboard tab. Wired from VendorDashboardPage so the
@@ -42,9 +43,13 @@ export default function OverviewTab({ onSwitchTab }: OverviewTabProps) {
   const { data: bookings = [] } = useMyBookings();
 
   const strength = computeProfileStrength(vendor);
+  // Only today-or-later events; past ones would otherwise fill the list.
+  const today = todayDateOnly();
   const upcoming = bookings.filter(
     (b) =>
-      (b.status === "confirmed" || b.status === "in_progress") && b.event_date,
+      (b.status === "confirmed" || b.status === "in_progress") &&
+      !!b.event_date &&
+      b.event_date.slice(0, 10) >= today,
   );
 
   return (
@@ -238,7 +243,7 @@ function KpiTile({
           <span className="eyebrow text-muted-foreground">{label}</span>
           <Icon className="h-3.5 w-3.5 text-muted-foreground" />
         </div>
-        <div className="num text-3xl font-semibold tracking-tight text-foreground">
+        <div className="num min-w-0 break-words text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
           {value}
         </div>
       </CardContent>

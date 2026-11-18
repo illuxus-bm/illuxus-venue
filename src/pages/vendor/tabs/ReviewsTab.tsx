@@ -2,7 +2,7 @@ import { formatDistanceToNow } from "date-fns";
 import { Star } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { EmptyState } from "@/components/EmptyState";
+import { ErrorState, EmptyState } from "@/components/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMyReviews, type MyReview } from "@/hooks/useMyReviews";
 
@@ -11,7 +11,7 @@ import { useMyReviews, type MyReview } from "@/hooks/useMyReviews";
  * Aggregates feed vendors.rating_avg / rating_count via a trigger.
  */
 export default function ReviewsTab() {
-  const { data: reviews = [], isLoading, error } = useMyReviews();
+  const { data: reviews = [], isLoading, error, refetch } = useMyReviews();
 
   if (isLoading) {
     return (
@@ -22,7 +22,7 @@ export default function ReviewsTab() {
     );
   }
   if (error) {
-    return <EmptyState message="Couldn't load your reviews." />;
+    return <ErrorState message="Couldn't load your reviews." onRetry={refetch} />;
   }
   if (reviews.length === 0) {
     return <EmptyState message="No reviews yet. Complete bookings to collect ratings." />;

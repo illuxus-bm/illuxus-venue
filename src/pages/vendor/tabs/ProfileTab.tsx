@@ -34,7 +34,7 @@ const urlish = z
   .or(z.literal(""));
 
 const schema = z.object({
-  business_name: z.string().min(2, "Business name is required"),
+  business_name: z.string().trim().min(2, "Business name is required"),
   website: urlish,
   city: z.string().max(80).optional().or(z.literal("")),
   country: z.string().max(80).optional().or(z.literal("")),
@@ -78,8 +78,10 @@ export default function ProfileTab() {
     defaultValues: buildDefaults(vendor),
   });
 
+  // Re-sync from the server copy (e.g. after a logo upload) without wiping
+  // fields the vendor is still editing.
   React.useEffect(() => {
-    reset(buildDefaults(vendor));
+    reset(buildDefaults(vendor), { keepDirtyValues: true });
   }, [vendor, reset]);
 
   const emailOn = watch("notify_email");
@@ -277,7 +279,7 @@ function CoverAndLogoCard() {
 
       const { error } = await supabase
         .from("vendors")
-        .update({ [column]: result.url })
+        .update(column === "logo_url" ? { logo_url: result.url } : { cover_url: result.url })
         .eq("id", vendor.id);
       if (error) {
         toast.error(error.message);

@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -21,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { safeHttpUrl } from "@/lib/safeUrl";
 
 import {
   EMPTY_VENUE_DRAFT,
@@ -110,13 +112,25 @@ export function VenueEditorDialog({
   const set = <K extends keyof VenueDraft>(key: K, value: VenueDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));
 
+  // Ref guard: save.isPending only flips on TanStack's next notify tick, so a
+  // fast double-click could otherwise insert the venue twice.
+  const savingRef = React.useRef(false);
   const handleSave = async () => {
+    if (savingRef.current) return;
     if (!draft.name.trim() || !draft.city?.trim()) return;
+    const problem = validateVenueDraft(draft);
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
+    savingRef.current = true;
     try {
-      await save.mutateAsync({ id: venue?.id, draft });
+      await save.mutateAsync({ id: venue?.id, draft: normalizeVenueDraft(draft) });
       onOpenChange(false);
     } catch {
       // Toast surfaced by the hook.
+    } finally {
+      savingRef.current = false;
     }
   };
 
@@ -128,7 +142,7 @@ export function VenueEditorDialog({
           // header / scrollable body / footer as a proper flex column.
           // p-0 lets the sticky header + footer own their own padding
           // and the middle area own its scroll.
-          "sm:max-w-2xl flex flex-col p-0 gap-0 max-h-[85vh]"
+          "sm:max-w-2xl flex flex-col p-0 gap-0 max-h-[85dvh]"
         }
       >
         <DialogHeader className="px-6 pt-6 pb-4 border-b border-border">
@@ -213,6 +227,7 @@ export function VenueEditorDialog({
               </div>
               <TextField
                 label="Google Maps link"
+                type="url"
                 value={draft.map_url ?? ""}
                 onChange={(v) => set("map_url", v)}
                 placeholder="https://maps.app.goo.gl/…"
@@ -364,13 +379,11 @@ export function VenueEditorDialog({
                   placeholder="Pick one"
                 />
                 <TextField
-                  label="Music curfew (HH:MM, 24h)"
+                  label="Music curfew (24h)"
+                  type="time"
                   value={draft.music_curfew_time?.slice(0, 5) ?? ""}
                   onChange={(v) =>
-                    set(
-                      "music_curfew_time",
-                      /^\d{2}:\d{2}$/.test(v) ? `${v}:00` : v || null,
-                    )
+                    set("music_curfew_time", /^\d{2}:\d{2}$/.test(v) ? `${v}:00` : null)
                   }
                   placeholder="22:00"
                 />
@@ -480,6 +493,7 @@ function TextField({
   placeholder,
   multiline,
   required,
+  type = "text",
 }: {
   label: string;
   value: string;
@@ -487,14 +501,17 @@ function TextField({
   placeholder?: string;
   multiline?: boolean;
   required?: boolean;
+  type?: "text" | "time" | "url";
 }) {
+  const id = React.useId();
   return (
     <div className="space-y-1">
-      <Label className="text-[12px]">
+      <Label htmlFor={id} className="text-[12px]">
         {label} {required && <span className="text-destructive">*</span>}
       </Label>
       {multiline ? (
         <textarea
+          id={id}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           rows={2}
@@ -503,9 +520,12 @@ function TextField({
         />
       ) : (
         <Input
+          id={id}
+          type={type}
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
+          required={required}
           className="h-9 text-sm"
         />
       )}
@@ -526,11 +546,16 @@ function NumberField({
   placeholder?: string;
   step?: number;
 }) {
+  const id = React.useId();
+  // step=1 fields map to integer columns; fractional ones to numeric(…,1).
+  const integer = step === 1;
   return (
     <div className="space-y-1">
-      <Label className="text-[12px]">{label}</Label>
+      <Label htmlFor={id} className="text-[12px]">{label}</Label>
       <Input
+        id={id}
         type="number"
+        inputMode={integer ? "numeric" : "decimal"}
         step={step}
         min={0}
         value={value ?? ""}
@@ -538,7 +563,10 @@ function NumberField({
           const raw = e.target.value.trim();
           if (raw === "") return onChange(null);
           const n = Number(raw);
-          onChange(Number.isFinite(n) ? n : null);
+          if (!Number.isFinite(n)) return onChange(null);
+          // Never negative; integers for count / area columns.
+          const clean = Math.max(0, integer ? Math.trunc(n) : Math.round(n * 10) / 10);
+          onChange(clean);
         }}
         placeholder={placeholder}
         className="h-9 text-sm"
@@ -560,15 +588,16 @@ function SelectField<V extends string>({
   options: ReadonlyArray<{ value: V; label: string }>;
   placeholder?: string;
 }) {
+  const id = React.useId();
   return (
     <div className="space-y-1">
-      <Label className="text-[12px]">{label}</Label>
+      <Label htmlFor={id} className="text-[12px]">{label}</Label>
       <div className="flex items-center gap-2">
         <Select
           value={value ?? undefined}
           onValueChange={(v) => onChange((v as V) ?? null)}
         >
-          <SelectTrigger className="h-9 text-sm">
+          <SelectTrigger id={id} className="h-9 text-sm">
             <SelectValue placeholder={placeholder} />
           </SelectTrigger>
           <SelectContent>
@@ -582,8 +611,9 @@ function SelectField<V extends string>({
         {value && (
           <button
             type="button"
-            className="text-[11px] text-muted-foreground hover:text-foreground shrink-0"
+            className="min-h-9 shrink-0 px-1 text-[11px] text-muted-foreground hover:text-foreground"
             onClick={() => onChange(null)}
+            aria-label={`Clear ${label}`}
           >
             Clear
           </button>
@@ -613,6 +643,36 @@ function ToggleField({
 /* ────────────────────────────────────────────────────────────────────── */
 /* Type helpers                                                           */
 /* ────────────────────────────────────────────────────────────────────── */
+
+const NUMERIC_LIMITS: Partial<Record<keyof VenueDraft, number>> = {
+  // numeric(4,1) / numeric(6,1) column bounds; Postgres rejects anything larger.
+  ceiling_height_ft: 999.9,
+  length_ft: 99999.9,
+  width_ft: 99999.9,
+};
+
+/** Returns a human-readable problem, or null when the draft can be saved. */
+function validateVenueDraft(d: VenueDraft): string | null {
+  for (const [key, max] of Object.entries(NUMERIC_LIMITS) as Array<[keyof VenueDraft, number]>) {
+    const v = d[key];
+    if (typeof v === "number" && v > max) return `That ${String(key).replace(/_/g, " ")} looks too large.`;
+  }
+  for (const [key, v] of Object.entries(d)) {
+    if (typeof v === "number" && (v < 0 || v > 2_000_000_000)) {
+      return `${key.replace(/_/g, " ")} must be a positive number.`;
+    }
+  }
+  const map = d.map_url?.trim();
+  if (map && !safeHttpUrl(map)) {
+    return "The Google Maps link must start with https://";
+  }
+  return null;
+}
+
+function normalizeVenueDraft(d: VenueDraft): VenueDraft {
+  const map = d.map_url?.trim();
+  return { ...d, map_url: map ? safeHttpUrl(map) : null };
+}
 
 function toDraft(v: Venue): VenueDraft {
   const {

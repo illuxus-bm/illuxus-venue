@@ -4,7 +4,7 @@ import { Pencil, Plus, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { EmptyState } from "@/components/EmptyState";
+import { ErrorState, EmptyState } from "@/components/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ServiceEditorDialog } from "@/components/vendor/ServiceEditorDialog";
 import {
@@ -26,7 +26,7 @@ import { formatMoneyCents } from "@/lib/utils";
  * pencil icon opens the same dialog in edit-mode (with a Delete button).
  */
 export default function ServicesTab() {
-  const { data: services = [], isLoading, error } = useMyServices();
+  const { data: services = [], isLoading, error, refetch } = useMyServices();
   const { data: venues = [] } = useMyVenues();
   const venueNames = React.useMemo(
     () => new Map(venues.map((v) => [v.id, v.name])),
@@ -65,7 +65,7 @@ export default function ServicesTab() {
       {isLoading ? (
         <Skeleton className="h-24 w-full rounded-xl" />
       ) : error ? (
-        <EmptyState message="Couldn't load your services." />
+        <ErrorState message="Couldn't load your services." onRetry={refetch} />
       ) : services.length === 0 ? (
         <EmptyState message="No services yet. Add your first package to start receiving bookings." />
       ) : (
@@ -140,7 +140,7 @@ function ServiceRow({
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100"
+            className="h-9 w-9 transition-opacity focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 [@media(hover:none)]:opacity-100"
             aria-label="Edit service"
             onClick={(e) => {
               e.stopPropagation();

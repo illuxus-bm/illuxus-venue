@@ -5,7 +5,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { EmptyState } from "@/components/EmptyState";
+import { ErrorState, EmptyState } from "@/components/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
 import { supabase } from "@/integrations/supabase/client";
@@ -27,7 +27,7 @@ import {
 export default function PortfolioTab() {
   const { vendor } = useVendorAuth();
   const qc = useQueryClient();
-  const { data: items = [], isLoading, error } = useMyPortfolio();
+  const { data: items = [], isLoading, error, refetch } = useMyPortfolio();
   const [uploading, setUploading] = React.useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -136,7 +136,7 @@ export default function PortfolioTab() {
       {isLoading ? (
         <Skeleton className="h-40 w-full rounded-xl" />
       ) : error ? (
-        <EmptyState message="Couldn't load your portfolio." />
+        <ErrorState message="Couldn't load your portfolio." onRetry={refetch} />
       ) : items.length === 0 ? (
         <EmptyState
           icon={<ImageIcon className="h-6 w-6" />}
@@ -161,7 +161,7 @@ export default function PortfolioTab() {
               <button
                 type="button"
                 onClick={() => onDelete(it)}
-                className="absolute right-2 top-2 rounded-full bg-black/60 p-1.5 text-white opacity-0 transition-opacity group-hover:opacity-100 focus:opacity-100"
+                className="absolute right-2 top-2 grid h-9 w-9 place-items-center rounded-full bg-black/60 text-white transition-opacity focus:opacity-100 focus-visible:ring-2 focus-visible:ring-ring sm:opacity-0 sm:group-hover:opacity-100 [@media(hover:none)]:opacity-100"
                 aria-label="Remove photo"
               >
                 <Trash2 className="h-3.5 w-3.5" />

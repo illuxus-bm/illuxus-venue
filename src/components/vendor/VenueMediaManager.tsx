@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Image as ImageIcon, Loader2, Star, StarOff, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -30,6 +31,7 @@ import {
   type VenueMediaKind,
 } from "@/hooks/useMyVenues";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
+import { safeHttpUrl } from "@/lib/safeUrl";
 
 /**
  * Media manager for a single venue. Two responsibilities:
@@ -47,11 +49,24 @@ const KIND_OPTIONS: Array<{ value: VenueMediaKind; label: string; hint: string }
   { value: "setup",      label: "Setup",         hint: "The space fully decorated" },
   { value: "facility",   label: "Facility",      hint: "Entrance, changing rooms, dining" },
   { value: "floor_plan", label: "Floor plan",    hint: "2D layout, exits, plug points" },
-  { value: "video",      label: "Video",         hint: "Walkthrough or event highlights" },
   { value: "other",      label: "Other",         hint: "Anything else worth showing" },
 ];
 
 const STORAGE_BUCKET = "venue-media";
+
+// Extension comes from the validated MIME type, never from the file name.
+const EXT_BY_MIME: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/avif": "avif",
+  "image/gif": "gif",
+  "video/mp4": "mp4",
+  "video/webm": "webm",
+  "video/quicktime": "mov",
+  "application/pdf": "pdf",
+};
+const ACCEPT = Object.keys(EXT_BY_MIME).join(",");
 // Mirrors the bucket's file_size_limit (migration 108) so an oversized
 // video fails fast instead of after a long upload.
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
@@ -71,6 +86,7 @@ export function VenueMediaManager({
   const addMedia = useAddVenueMedia();
   const removeMedia = useDeleteVenueMedia();
   const { vendor } = useVendorAuth();
+  const qc = useQueryClient();
 
   const [uploading, setUploading] = React.useState(false);
   // Batch progress: "3 / 8" while multiple files are working through.
@@ -105,7 +121,7 @@ export function VenueMediaManager({
    * failures don't abort the batch — they're toasted and skipped.
    */
   const uploadFiles = async (files: FileList) => {
-    if (!vendor?.id) return;
+    if (!vendor?.id || uploading) return;
     const list = Array.from(files);
     if (list.length === 0) return;
 
@@ -120,55 +136,73 @@ export function VenueMediaManager({
     let alreadyHasCover = media.some((m) => m.is_cover);
     let failures = 0;
 
-    for (let i = 0; i < list.length; i++) {
-      const file = list[i];
-      try {
-        if (file.size > MAX_FILE_BYTES) {
-          toast.error(`${file.name}: larger than 50 MB`);
+    try {
+      for (let i = 0; i < list.length; i++) {
+        const file = list[i];
+        try {
+          if (file.size > MAX_FILE_BYTES) {
+            toast.error(`${file.name}: larger than 50 MB`);
+            failures += 1;
+            continue;
+          }
+          const ext = EXT_BY_MIME[file.type];
+          if (!ext) {
+            toast.error(`${file.name}: unsupported file type`);
+            failures += 1;
+            continue;
+          }
+          const isVideo = file.type.startsWith("video/");
+          // Path shape: `<venue_id>/<uuid>.<ext>`. Keeps files grouped per
+          // venue for easy inspection in the Storage dashboard and matches
+          // the storage RLS that scopes writes by object owner.
+          const objectName = `${venueId}/${crypto.randomUUID()}.${ext}`;
+
+          const { error: upErr } = await supabase.storage
+            .from(STORAGE_BUCKET)
+            .upload(objectName, file, {
+              cacheControl: "3600",
+              upsert: false,
+              contentType: file.type || undefined,
+            });
+          if (upErr) {
+            toast.error(`${file.name}: ${upErr.message ?? "Upload failed"}`);
+            failures += 1;
+            continue;
+          }
+
+          const { data: publicUrl } = supabase.storage
+            .from(STORAGE_BUCKET)
+            .getPublicUrl(objectName);
+
+          // Videos never become the cover — marketplace cards render it as <img>.
+          const isImage = file.type.startsWith("image/");
+          const shouldCover = !alreadyHasCover && isImage;
+          try {
+            await addMedia.mutateAsync({
+              venue_id: venueId,
+              url: publicUrl.publicUrl,
+              media_kind: isVideo ? "video" : pendingKind,
+              caption: caption.trim() || undefined,
+              is_cover: shouldCover,
+            });
+          } catch {
+            // The hook already toasted the error. Remove the orphaned object.
+            failures += 1;
+            void supabase.storage.from(STORAGE_BUCKET).remove([objectName]);
+            continue;
+          }
+          if (shouldCover) alreadyHasCover = true;
+        } catch (err) {
           failures += 1;
-          continue;
+          toast.error(`${file.name}: ${(err as Error)?.message ?? "Upload failed"}`);
+        } finally {
+          setUploadProgress({ done: i + 1, total: list.length });
         }
-        const isVideo = file.type.startsWith("video/");
-        const ext = file.name.split(".").pop()?.toLowerCase() ?? "bin";
-        // Path shape: `<venue_id>/<uuid>.<ext>`. Keeps files grouped per
-        // venue for easy inspection in the Storage dashboard and matches
-        // the storage RLS that scopes writes by object owner.
-        const objectName = `${venueId}/${crypto.randomUUID()}.${ext}`;
-
-        const { error: upErr } = await supabase.storage
-          .from(STORAGE_BUCKET)
-          .upload(objectName, file, {
-            cacheControl: "3600",
-            upsert: false,
-            contentType: file.type || undefined,
-          });
-        if (upErr) {
-          toast.error(`${file.name}: ${upErr.message ?? "Upload failed"}`);
-          failures += 1;
-          continue;
-        }
-
-        const { data: publicUrl } = supabase.storage
-          .from(STORAGE_BUCKET)
-          .getPublicUrl(objectName);
-
-        // Videos never become the cover — marketplace cards render it as <img>.
-        const shouldCover = !alreadyHasCover && !isVideo;
-        await addMedia.mutateAsync({
-          venue_id: venueId,
-          url: publicUrl.publicUrl,
-          media_kind: isVideo ? "video" : pendingKind,
-          caption: caption.trim() || undefined,
-          is_cover: shouldCover,
-        });
-        if (shouldCover) alreadyHasCover = true;
-      } finally {
-        setUploadProgress({ done: i + 1, total: list.length });
       }
+    } finally {
+      setUploading(false);
+      setUploadProgress(null);
     }
-
-    setUploading(false);
-    setUploadProgress(null);
 
     // Only clear the caption on a fully-successful batch so a partial
     // failure doesn't force the user to retype what they had.
@@ -192,34 +226,44 @@ export function VenueMediaManager({
     }
   };
 
+  const [coverBusy, setCoverBusy] = React.useState(false);
   const toggleCover = async (id: string, nextIsCover: boolean) => {
-    if (nextIsCover) {
-      // Unset the current cover(s) first so we don't have two.
-      const current = media.filter((m) => m.is_cover && m.id !== id);
-      await Promise.all(
-        current.map((m) =>
-          (supabase as any)
-            .from("venue_media")
-            .update({ is_cover: false })
-            .eq("id", m.id),
-        ),
-      );
+    if (coverBusy) return;
+    setCoverBusy(true);
+    try {
+      if (nextIsCover) {
+        // Unset the current cover(s) first so we don't end up with two.
+        const current = media.filter((m) => m.is_cover && m.id !== id);
+        const results = await Promise.all(
+          current.map((m) =>
+            (supabase as any)
+              .from("venue_media")
+              .update({ is_cover: false })
+              .eq("id", m.id),
+          ),
+        );
+        const failed = results.find((r: { error: unknown }) => r.error);
+        if (failed) throw failed.error;
+      }
+      const { error } = await (supabase as any)
+        .from("venue_media")
+        .update({ is_cover: nextIsCover })
+        .eq("id", id);
+      if (error) throw error;
+      toast.success(nextIsCover ? "Set as cover photo" : "Removed cover flag");
+    } catch (err) {
+      toast.error((err as Error)?.message ?? "Could not update cover");
+    } finally {
+      await qc.invalidateQueries({ queryKey: ["venue-media", venueId] });
+      qc.invalidateQueries({ queryKey: ["vendor-venues", vendor?.id] });
+      setCoverBusy(false);
     }
-    const { error } = await (supabase as any)
-      .from("venue_media")
-      .update({ is_cover: nextIsCover })
-      .eq("id", id);
-    if (error) {
-      toast.error(error.message ?? "Could not update cover");
-      return;
-    }
-    toast.success(nextIsCover ? "Set as cover photo" : "Removed cover flag");
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="sm:max-w-3xl flex flex-col p-0 gap-0 max-h-[85vh]"
+        className="sm:max-w-3xl flex flex-col p-0 gap-0 max-h-[85dvh]"
       >
         <DialogHeader className="px-6 pt-6 pb-4 border-b border-border">
           <DialogTitle>Media · {venueName}</DialogTitle>
@@ -269,7 +313,7 @@ export function VenueMediaManager({
             <input
               ref={fileInputRef}
               type="file"
-              accept="image/*,application/pdf,video/mp4,video/webm,video/quicktime"
+              accept={ACCEPT}
               multiple
               disabled={uploading}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
@@ -336,7 +380,7 @@ export function VenueMediaManager({
                           <div className="h-full w-full flex flex-col items-center justify-center text-muted-foreground text-[11px] gap-1">
                             <ImageIcon className="h-6 w-6" />
                             <a
-                              href={m.url}
+                              href={safeHttpUrl(m.url) ?? undefined}
                               target="_blank"
                               rel="noreferrer"
                               className="underline"
@@ -359,8 +403,8 @@ export function VenueMediaManager({
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-6 px-1.5 text-[11px]"
-                            disabled={isVideoUrl(m.url)}
+                            className="h-9 px-2 text-[11px]"
+                            disabled={isVideoUrl(m.url) || coverBusy}
                             onClick={() => toggleCover(m.id, !m.is_cover)}
                             aria-label={m.is_cover ? "Remove cover" : "Set as cover"}
                           >
@@ -377,8 +421,10 @@ export function VenueMediaManager({
                           <Button
                             variant="ghost"
                             size="icon"
-                            className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                            className="h-9 w-9 text-muted-foreground hover:text-destructive"
+                            disabled={removeMedia.isPending}
                             onClick={() =>
+                              window.confirm("Delete this file? This can't be undone.") &&
                               removeMedia.mutate({ id: m.id, venue_id: venueId })
                             }
                             aria-label="Delete media"

@@ -2,7 +2,7 @@ import { formatDistanceToNow } from "date-fns";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
-import { EmptyState } from "@/components/EmptyState";
+import { ErrorState, EmptyState } from "@/components/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useMyQuotes, type MyQuote } from "@/hooks/useMyQuotes";
 import { formatMoneyCents } from "@/lib/utils";
@@ -12,7 +12,7 @@ import { formatMoneyCents } from "@/lib/utils";
  * Real quotes.status enum is: draft / sent / accepted / declined / expired.
  */
 export default function QuotesTab() {
-  const { data: quotes = [], isLoading, error } = useMyQuotes();
+  const { data: quotes = [], isLoading, error, refetch } = useMyQuotes();
 
   if (isLoading) {
     return (
@@ -23,7 +23,7 @@ export default function QuotesTab() {
     );
   }
   if (error) {
-    return <EmptyState message="Couldn't load your quotes." />;
+    return <ErrorState message="Couldn't load your quotes." onRetry={refetch} />;
   }
   if (quotes.length === 0) {
     return <EmptyState message="You haven't sent any quotes yet." />;

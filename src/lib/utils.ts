@@ -13,12 +13,23 @@ export function cn(...inputs: ClassValue[]) {
  * Format a decimal amount (e.g. 100.50) as a currency string using the
  * browser locale.
  */
-export function formatCurrency(amount: number, currency = "USD") {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 0,
-  }).format(amount);
+export function formatCurrency(amount: number, currency?: string | null) {
+  return safeFormat(Number.isFinite(amount) ? amount : 0, currency);
+}
+
+/** Intl throws RangeError on null / unknown currency codes, which used to
+ *  white-screen the dashboard. Fall back to a plain number with the code. */
+function safeFormat(value: number, currency?: string | null): string {
+  const code = (currency || "USD").toUpperCase();
+  try {
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: code,
+      maximumFractionDigits: 0,
+    }).format(value);
+  } catch {
+    return `${code} ${Math.round(value).toLocaleString()}`;
+  }
 }
 
 /**
@@ -30,14 +41,10 @@ export function formatCurrency(amount: number, currency = "USD") {
  */
 export function formatMoneyCents(
   minorUnits: number | string | null | undefined,
-  currency = "USD",
+  currency?: string | null,
 ) {
   const n = minorUnits == null ? 0 : Number(minorUnits);
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency,
-    maximumFractionDigits: 0,
-  }).format(n / 100);
+  return safeFormat(Number.isFinite(n) ? n / 100 : 0, currency);
 }
 
 /** Absolute URL back to the main illuxus app (env-configurable). */

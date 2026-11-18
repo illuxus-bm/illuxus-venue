@@ -3,6 +3,7 @@ import type { Session, User } from "@supabase/supabase-js";
 
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { reportError } from "@/lib/monitoring";
 
 type Vendor = Database["public"]["Tables"]["vendors"]["Row"];
 
@@ -62,6 +63,10 @@ interface VendorAuthState {
   session: Session | null;
   user: User | null;
   vendor: Vendor | null;
+  /** Set when loading the vendor row failed for a reason other than "no
+   *  membership" (network, 5xx). The gate shows a retry instead of the
+   *  misleading "not authorized" screen. */
+  vendorError: Error | null;
   /**
    * Signs the user in with email + password and enforces vendor-membership.
    * If Supabase reports "Email not confirmed", surfaces a clear message so
@@ -135,65 +140,90 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
   const [vendor, setVendor] = React.useState<Vendor | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [vendorLoading, setVendorLoading] = React.useState(false);
+  const [vendorError, setVendorError] = React.useState<Error | null>(null);
 
-  const loadVendor = React.useCallback(async (uid: string) => {
-    setVendorLoading(true);
-    try {
-      const { data: memberRow } = await supabase
-        .from("vendor_members")
-        .select("vendor_id")
-        .eq("user_id", uid)
-        .maybeSingle();
+  // Monotonic counter: only the latest loadVendor call may write state, so a
+  // slow response can't resurrect a vendor after sign-out or account switch.
+  const loadSeq = React.useRef(0);
+  // The user whose vendor row is loaded (or loading). Auth fires SIGNED_IN on
+  // tab refocus and TOKEN_REFRESHED hourly; neither should reload the vendor.
+  const loadedUid = React.useRef<string | null>(null);
 
-      if (!memberRow?.vendor_id) {
-        setVendor(null);
-        return;
+  const loadVendor = React.useCallback(
+    async (uid: string, opts: { silent?: boolean } = {}) => {
+      const seq = ++loadSeq.current;
+      loadedUid.current = uid;
+      if (!opts.silent) setVendorLoading(true);
+      try {
+        const { data: memberRow, error: memberErr } = await supabase
+          .from("vendor_members")
+          .select("vendor_id")
+          .eq("user_id", uid)
+          .limit(1)
+          .maybeSingle();
+        if (memberErr) throw memberErr;
+
+        let row: Vendor | null = null;
+        if (memberRow?.vendor_id) {
+          const { data: vendorRow, error: vendorErr } = await supabase
+            .from("vendors")
+            .select("*")
+            .eq("id", memberRow.vendor_id)
+            .maybeSingle();
+          if (vendorErr) throw vendorErr;
+          row = (vendorRow as Vendor | null) ?? null;
+        }
+
+        if (seq !== loadSeq.current) return;
+        setVendor(row);
+        setVendorError(null);
+      } catch (e) {
+        if (seq !== loadSeq.current) return;
+        // Keep any previously loaded vendor; surface the failure.
+        setVendorError(e instanceof Error ? e : new Error(String(e)));
+        reportError(e, { source: "loadVendor" });
+      } finally {
+        if (seq === loadSeq.current) setVendorLoading(false);
       }
+    },
+    [],
+  );
 
-      const { data: vendorRow } = await supabase
-        .from("vendors")
-        .select("*")
-        .eq("id", memberRow.vendor_id)
-        .maybeSingle();
-
-      setVendor((vendorRow as Vendor | null) ?? null);
-    } finally {
-      setVendorLoading(false);
-    }
+  const clearVendor = React.useCallback(() => {
+    loadSeq.current += 1; // invalidate in-flight loads
+    loadedUid.current = null;
+    setVendor(null);
+    setVendorError(null);
+    setVendorLoading(false);
   }, []);
 
-  // Boot: probe existing session + subscribe to auth-state changes. When the
-  // user clicks the confirmation link, Supabase's detectSessionInUrl parses
-  // the returned tokens and fires SIGNED_IN here — we then load the vendor
-  // row that the DB trigger created moments before.
+  // Boot + subscribe. INITIAL_SESSION carries the restored session, so no
+  // separate getSession() probe is needed (that used to load the vendor
+  // twice on every boot). When the user clicks the confirmation link,
+  // detectSessionInUrl parses the tokens and SIGNED_IN fires here.
   React.useEffect(() => {
-    let cancelled = false;
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (cancelled) return;
-      setSession(data.session);
-      setUser(data.session?.user ?? null);
-      if (data.session?.user?.id) {
-        void loadVendor(data.session.user.id);
-      }
-      setLoading(false);
-    });
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, sess) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, sess) => {
       setSession(sess);
       setUser(sess?.user ?? null);
-      if (sess?.user?.id) {
-        void loadVendor(sess.user.id);
-      } else {
-        setVendor(null);
+      const uid = sess?.user?.id ?? null;
+      if (!uid) {
+        clearVendor();
+      } else if (uid !== loadedUid.current) {
+        // Never await Supabase calls inside this callback (auth lock deadlock).
+        void loadVendor(uid);
       }
+      if (event === "INITIAL_SESSION") setLoading(false);
     });
 
+    // Safety net: if INITIAL_SESSION never arrives (storage blocked, etc.)
+    // don't leave the app on a spinner forever.
+    const fallback = window.setTimeout(() => setLoading(false), 8000);
+
     return () => {
-      cancelled = true;
+      window.clearTimeout(fallback);
       sub.subscription.unsubscribe();
     };
-  }, [loadVendor]);
+  }, [loadVendor, clearVendor]);
 
   const signIn = React.useCallback(
     async (email: string, password: string) => {
@@ -237,6 +267,7 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
         .from("vendor_members")
         .select("vendor_id")
         .eq("user_id", uid)
+        .limit(1)
         .maybeSingle();
 
       if (memberErr) {
@@ -356,14 +387,21 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
   );
 
   const signOut = React.useCallback(async () => {
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      // Server-side revoke failed (offline, etc.). Still drop the local
+      // session so the device is signed out and a reload can't restore it.
+      reportError(error, { source: "signOut" });
+      await supabase.auth.signOut({ scope: "local" });
+    }
     setSession(null);
     setUser(null);
-    setVendor(null);
-  }, []);
+    clearVendor();
+  }, [clearVendor]);
 
+  // Silent: refreshing after a profile save must not unmount the dashboard.
   const refreshVendor = React.useCallback(async () => {
-    if (user?.id) await loadVendor(user.id);
+    if (user?.id) await loadVendor(user.id, { silent: true });
   }, [user?.id, loadVendor]);
 
   const value: VendorAuthState = {
@@ -372,6 +410,7 @@ export function VendorAuthProvider({ children }: { children: React.ReactNode }) 
     session,
     user,
     vendor,
+    vendorError,
     signIn,
     signUp,
     resendConfirmation,

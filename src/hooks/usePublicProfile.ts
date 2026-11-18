@@ -108,6 +108,11 @@ export function usePublicVendorProfile(vendorId: string | undefined) {
         db.from("vendor_service_areas").select("*").eq("vendor_id", vendorId),
       ]);
 
+      // Services and portfolio are core to the page: fail loudly instead of
+      // rendering "nothing listed". Reviews / areas stay best-effort.
+      const failed = [services, portfolio].find((r) => r.error);
+      if (failed) throw failed.error;
+
       return {
         vendor: vendor as PublicVendor,
         services: ((services.data ?? []) as PublicService[]).map((s) => ({
@@ -175,6 +180,10 @@ export function usePublicVenue(venueId: string | undefined) {
           .or(`venue_id.is.null,venue_id.eq.${venueId}`)
           .order("created_at", { ascending: true }),
       ]);
+
+      // A failed secondary read must not render as "no photos / no services".
+      const failed = [media, vendor, services].find((r) => r.error);
+      if (failed) throw failed.error;
 
       return {
         venue: venue as Venue,

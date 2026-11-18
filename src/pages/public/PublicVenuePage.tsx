@@ -32,6 +32,8 @@ import {
   spaceTypeLabel,
 } from "@/lib/venueLabels";
 import { initials, planEventUrl } from "@/lib/utils";
+import { safeHttpUrl } from "@/lib/safeUrl";
+import { useDocumentMeta } from "@/hooks/useDocumentMeta";
 
 /**
  * Public page for one venue (/venues/:venueId): gallery, capacity by seating
@@ -44,9 +46,15 @@ export default function PublicVenuePage() {
   const { venueId } = useParams<{ venueId: string }>();
   const { data, isLoading, error } = usePublicVenue(venueId);
 
-  React.useEffect(() => {
-    if (data?.venue) document.title = `${data.venue.name} · Illuxus Venues`;
-  }, [data?.venue]);
+  const v = data?.venue;
+  useDocumentMeta({
+    title: v ? (v.city ? `${v.name}, ${v.city}` : v.name) : isLoading ? undefined : "Venue not found",
+    description:
+      v?.description ??
+      (v ? `${v.name}${v.city ? ` in ${v.city}` : ""}: capacity, amenities, house rules and add-on services. Book through Illuxus.` : undefined),
+    image: data?.media.find((m) => m.is_cover)?.url ?? null,
+    noindex: !isLoading && (!!error || !data),
+  });
 
   if (isLoading) {
     return (
@@ -79,6 +87,7 @@ export default function PublicVenuePage() {
     kind: mediaKindFromUrl(m.url, m.media_kind),
   }));
   const address = [venue.address_line, venue.city, venue.state, venue.pincode].filter(Boolean).join(", ");
+  const mapUrl = safeHttpUrl(venue.map_url);
   const capacities = CAPACITY_LAYOUTS.map((l): { label: string; value: number | null } => ({
     label: l.label,
     value: venue[l.key],
@@ -176,12 +185,12 @@ export default function PublicVenuePage() {
               </Block>
             )}
 
-            {(address || venue.map_url) && (
+            {(address || mapUrl) && (
               <Block title="Location">
                 {address && <p className="text-[16px]">{address}</p>}
-                {venue.map_url && (
+                {mapUrl && (
                   <a
-                    href={venue.map_url}
+                    href={mapUrl}
                     target="_blank"
                     rel="noreferrer noopener"
                     className="mt-3 inline-flex items-center gap-1.5 text-[14px] font-semibold underline decoration-accent decoration-2 underline-offset-[6px]"

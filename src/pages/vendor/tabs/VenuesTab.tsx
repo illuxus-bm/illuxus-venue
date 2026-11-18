@@ -23,7 +23,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { EmptyState } from "@/components/EmptyState";
+import { ErrorState, EmptyState } from "@/components/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import { VenueEditorDialog } from "@/components/vendor/VenueEditorDialog";
@@ -48,7 +48,7 @@ import {
  * text fields.
  */
 export default function VenuesTab() {
-  const { data: venues = [], isLoading, error } = useMyVenues();
+  const { data: venues = [], isLoading, error, refetch } = useMyVenues();
   const [editorFor, setEditorFor] = React.useState<Venue | "new" | null>(null);
   const [mediaFor, setMediaFor] = React.useState<Venue | null>(null);
   const [servicesFor, setServicesFor] = React.useState<Venue | null>(null);
@@ -62,7 +62,7 @@ export default function VenuesTab() {
     );
   }
   if (error) {
-    return <EmptyState message="Couldn't load your venues." />;
+    return <ErrorState message="Couldn't load your venues." onRetry={refetch} />;
   }
 
   return (

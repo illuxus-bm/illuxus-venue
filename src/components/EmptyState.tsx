@@ -34,3 +34,43 @@ export function EmptyState({ icon, message, hint, className }: EmptyStateProps) 
     </div>
   );
 }
+
+interface ErrorStateProps {
+  message: string;
+  /** Re-run the failed query. */
+  onRetry?: () => unknown;
+  className?: string;
+}
+
+/** Load-failure card with a Retry button, so a transient error is never a dead end. */
+export function ErrorState({ message, onRetry, className }: ErrorStateProps) {
+  const [busy, setBusy] = React.useState(false);
+  return (
+    <div
+      role="alert"
+      className={cn(
+        "flex flex-col items-center justify-center gap-3 rounded-xl border border-destructive/30 bg-card px-6 py-12 text-center",
+        className,
+      )}
+    >
+      <p className="text-sm text-muted-foreground">{message}</p>
+      {onRetry ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await onRetry();
+            } finally {
+              setBusy(false);
+            }
+          }}
+          className="inline-flex min-h-10 items-center rounded-md border border-border px-4 text-sm font-medium hover:bg-secondary disabled:opacity-60"
+        >
+          {busy ? "Retrying…" : "Try again"}
+        </button>
+      ) : null}
+    </div>
+  );
+}

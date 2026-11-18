@@ -5,7 +5,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "node_modules"] },
+  { ignores: ["dist", "dev-dist", "coverage", "node_modules", "android", "ios"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
@@ -29,5 +29,11 @@ export default tseslint.config(
       ],
       "@typescript-eslint/no-explicit-any": "off",
     },
+  },
+  {
+    // shadcn primitives and context modules export variants / hooks next to
+    // components by design; Fast Refresh falls back to a full reload there.
+    files: ["src/components/ui/**/*.{ts,tsx}", "src/contexts/**/*.{ts,tsx}"],
+    rules: { "react-refresh/only-export-components": "off" },
   },
 );

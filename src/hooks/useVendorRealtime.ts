@@ -3,6 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import { supabase } from "@/integrations/supabase/client";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
+import { reportError } from "@/lib/monitoring";
 
 /**
  * Subscribes to every table the vendor dashboard cares about and invalidates
@@ -19,7 +20,10 @@ export function useVendorRealtime() {
     if (!vendor?.id) return;
 
     const channel = supabase
-      .channel(`vendor:${vendor.id}`)
+      // Unique topic per mount: realtime-js reuses channels by topic, and a
+      // remount while the previous channel is still "leaving" would otherwise
+      // get a dead channel back and silently stop receiving events.
+      .channel(`vendor:${vendor.id}:${Math.random().toString(36).slice(2)}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "rfq_invitees", filter: `vendor_id=eq.${vendor.id}` },
@@ -65,15 +69,22 @@ export function useVendorRealtime() {
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "vendor_reviews", filter: `vendor_id=eq.${vendor.id}` },
+        // vendor_reviews has no vendor_id column (reviews hang off bookings).
+        // A filter on a missing column makes Realtime reject the WHOLE channel,
+        // so subscribe unfiltered; RLS still scopes what is delivered.
+        { event: "*", schema: "public", table: "vendor_reviews" },
         () => {
           qc.invalidateQueries({ queryKey: ["vendor-reviews", vendor.id] });
         },
       )
-      .subscribe();
+      .subscribe((status, err) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          reportError(err ?? new Error(`Realtime ${status}`), { source: "useVendorRealtime" });
+        }
+      });
 
     return () => {
-      supabase.removeChannel(channel);
+      void supabase.removeChannel(channel);
     };
   }, [vendor?.id, qc]);
 }

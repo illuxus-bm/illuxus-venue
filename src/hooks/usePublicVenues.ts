@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { supabase } from "@/integrations/supabase/client";
+import { reportError } from "@/lib/monitoring";
 
 /**
  * Listed venues for the public landing page. Works signed out: venues RLS
@@ -52,13 +53,15 @@ export function usePublicVenues() {
       if (rows.length === 0) return [];
 
       // Cover photo per venue; videos are skipped since the card renders <img>.
-      const { data: media } = await (supabase as any)
+      const { data: media, error: mediaErr } = await (supabase as any)
         .from("venue_media")
         .select("venue_id, url, is_cover, media_kind, sort_order")
         .in("venue_id", rows.map((r) => r.id))
         .neq("media_kind", "video")
         .order("is_cover", { ascending: false })
         .order("sort_order", { ascending: true });
+      // Covers are cosmetic: keep the venue list, but don't hide the failure.
+      if (mediaErr) reportError(mediaErr, { source: "usePublicVenues.media" });
       const coverById = new Map<string, string>();
       for (const m of (media ?? []) as Array<{ venue_id: string; url: string }>) {
         if (!coverById.has(m.venue_id) && /\.(png|jpe?g|webp|avif|gif|svg)(\?|$)/i.test(m.url)) {

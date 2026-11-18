@@ -171,3 +171,38 @@
   border-color: hsl(var(--primary));
   color: hsl(var(--primary-foreground));
 }
+
+/* Safe areas: notch / status bar / home indicator on iOS, and Android
+   edge-to-edge. env() is 0 on desktop browsers, so these are no-ops there. */
+@layer utilities {
+  .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .pl-safe { padding-left: env(safe-area-inset-left, 0px); }
+  .pr-safe { padding-right: env(safe-area-inset-right, 0px); }
+  .mb-safe { margin-bottom: env(safe-area-inset-bottom, 0px); }
+}
+
+/* Native shell: no text selection on chrome, no rubber-band overscroll glow,
+   and respect the side insets in landscape. */
+html.native body {
+  overscroll-behavior-y: none;
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+html.native header,
+html.native nav,
+html.native button {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

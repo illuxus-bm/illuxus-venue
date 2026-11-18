@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, FileText, Play, X } from "lucide-react";
 
 import type { GalleryItem } from "@/lib/media";
 import { cn } from "@/lib/utils";
+import { safeHttpUrl } from "@/lib/safeUrl";
 
 /**
  * Photo / video gallery for the public pages: a large lead item, a strip of
@@ -46,10 +47,13 @@ export function MediaGallery({ items, className }: { items: GalleryItem[]; class
       )}
       {files.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {files.map((f) => (
+          {files.map((f) => {
+            const href = safeHttpUrl(f.url);
+            if (!href) return null;
+            return (
             <a
               key={f.id}
-              href={f.url}
+              href={href}
               target="_blank"
               rel="noreferrer noopener"
               className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3.5 py-2 text-[13px] font-medium hover:border-foreground/30"
@@ -57,7 +61,8 @@ export function MediaGallery({ items, className }: { items: GalleryItem[]; class
               <FileText className="h-4 w-4 text-primary" />
               {f.caption ?? "Floor plan (PDF)"}
             </a>
-          ))}
+            );
+          })}
         </div>
       )}
       {open !== null && <Viewer items={viewable} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />}
@@ -106,11 +111,37 @@ function Viewer({
     [index, items.length, onIndex],
   );
 
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const closeRef = React.useRef<HTMLButtonElement>(null);
+
+  // Focus management: move focus into the viewer, keep Tab inside it, and
+  // hand focus back to the thumbnail that opened it.
+  React.useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    closeRef.current?.focus();
+    return () => opener?.focus?.();
+  }, []);
+
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
       if (e.key === "ArrowRight") go(1);
       if (e.key === "ArrowLeft") go(-1);
+      if (e.key === "Tab" && rootRef.current) {
+        const focusables = rootRef.current.querySelectorAll<HTMLElement>(
+          'button, [href], video, [tabindex]:not([tabindex="-1"])',
+        );
+        if (focusables.length === 0) return;
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     const overflow = document.body.style.overflow;
@@ -124,12 +155,12 @@ function Viewer({
   if (!item) return null;
   const nav = "grid h-11 w-11 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20";
   return (
-    <div role="dialog" aria-modal="true" aria-label="Media viewer" className="fixed inset-0 z-50 flex flex-col bg-black/90" onClick={onClose}>
+    <div ref={rootRef} role="dialog" aria-modal="true" aria-label="Media viewer" className="fixed inset-0 z-50 flex flex-col bg-black/90 pb-safe pl-safe pr-safe pt-safe" onClick={onClose}>
       <div className="flex items-center justify-between p-4 text-white/80" onClick={(e) => e.stopPropagation()}>
         <span className="num text-[13px]">
           {index + 1} / {items.length}
         </span>
-        <button type="button" onClick={onClose} className={nav} aria-label="Close">
+        <button ref={closeRef} type="button" onClick={onClose} className={nav} aria-label="Close">
           <X className="h-5 w-5" />
         </button>
       </div>

@@ -43,7 +43,7 @@ export function VendorHeader() {
       .toUpperCase() ?? "V";
 
   return (
-    <header className="sticky top-0 z-30 border-b border-border/60 bg-background/95 backdrop-blur">
+    <header className="sticky top-0 z-30 border-b border-border/60 bg-background/95 pt-safe backdrop-blur">
       <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-4 sm:px-6">
         <Link to="/" className="flex items-center gap-2.5" aria-label="Illuxus Venues home">
           <IlluxusWordmark height={20} ariaLabel="" />

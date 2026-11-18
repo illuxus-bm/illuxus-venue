@@ -26,6 +26,9 @@ import { PublicServiceList } from "@/components/public/PublicServiceList";
 import { StarRating } from "@/components/StarRating";
 import { usePublicVendorProfile, useVendorVenues, type PublicReview } from "@/hooks/usePublicProfile";
 import { initials, planEventUrl } from "@/lib/utils";
+import { safeExternalUrl } from "@/lib/safeUrl";
+import { parseDateOnly } from "@/lib/dates";
+import { useDocumentMeta } from "@/hooks/useDocumentMeta";
 
 /**
  * Public profile of a venue business (/v/:vendorId): who they are, the
@@ -37,9 +40,16 @@ export default function PublicProfilePage() {
   const { data, isLoading, error } = usePublicVendorProfile(vendorId);
   const { venues, isLoading: venuesLoading } = useVendorVenues(vendorId);
 
-  React.useEffect(() => {
-    if (data?.vendor) document.title = `${data.vendor.business_name} · Illuxus Venues`;
-  }, [data?.vendor]);
+  const vend = data?.vendor;
+  useDocumentMeta({
+    title: vend ? vend.business_name : isLoading ? undefined : "Profile not found",
+    description:
+      vend?.tagline ??
+      vend?.bio?.slice(0, 200) ??
+      (vend ? `${vend.business_name} on Illuxus: venues, services, portfolio and reviews.` : undefined),
+    image: vend?.cover_url ?? vend?.logo_url ?? null,
+    noindex: !isLoading && (!!error || !data),
+  });
 
   if (isLoading) {
     return (
@@ -307,7 +317,7 @@ function ReviewCard({ review }: { review: PublicReview }) {
       {review.comment && <blockquote className="mt-3 text-[15px] leading-relaxed">“{review.comment}”</blockquote>}
       <figcaption className="mt-3 text-[12px] text-muted-foreground">
         Organizer review ·{" "}
-        {new Date(review.event_date ?? review.created_at).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}
+        {(review.event_date ? parseDateOnly(review.event_date) : new Date(review.created_at)).toLocaleDateString("en-IN", { month: "short", year: "numeric" })}
       </figcaption>
     </figure>
   );
@@ -325,7 +335,7 @@ function EmptyNote({ text }: { text: string }) {
 
 /** Accepts "example.com" as well as full URLs. */
 function externalUrl(url: string): string {
-  return /^https?:\/\//i.test(url) ? url : `https://${url}`;
+  return safeExternalUrl(url) ?? "#";
 }
 
 function socialLinks(socials: Record<string, string> | null) {

@@ -51,7 +51,8 @@ const schema = z.object({
   venue_id: z.string().optional().or(z.literal("")),
 });
 
-type FormValues = z.infer<typeof schema>;
+type FormInput = z.input<typeof schema>;
+type FormValues = z.output<typeof schema>;
 
 interface ServiceEditorDialogProps {
   open: boolean;
@@ -87,7 +88,7 @@ export function ServiceEditorDialog({
     setValue,
     watch,
     formState: { errors },
-  } = useForm<FormValues>({
+  } = useForm<FormInput, unknown, FormValues>({
     resolver: zodResolver(schema),
     defaultValues: buildDefaults(service ?? null, vendor?.default_currency, defaultVenueId),
   });
@@ -434,9 +435,13 @@ function buildDefaults(
     title: service?.title ?? "",
     description: service?.description ?? "",
     base_price: service ? Number(service.base_price) / 100 : 0,
-    currency:
-      (service?.currency as (typeof CURRENCIES)[number]) ??
-      (CURRENCIES.includes(fallbackCurrency) ? fallbackCurrency : "USD"),
+    // An unknown stored currency would fail zod silently (no error is shown
+    // for the select), so fall back to a supported one.
+    currency: CURRENCIES.includes(service?.currency as (typeof CURRENCIES)[number])
+      ? (service!.currency as (typeof CURRENCIES)[number])
+      : CURRENCIES.includes(fallbackCurrency)
+        ? fallbackCurrency
+        : "USD",
     unit: (service?.unit as FormValues["unit"]) ?? "per_event",
     duration: service?.duration ?? "",
     is_instant_book: service?.is_instant_book ?? false,

@@ -101,11 +101,13 @@ export function useInboxVenueRequests() {
       );
       const serviceById = new Map<string, InboxVenueRequestService>();
       if (allServiceIds.length > 0) {
-        const { data: services } = await (supabase as any)
+        const { data: services, error: servicesErr } = await (supabase as any)
           .from("vendor_services")
           .select("id, title, category")
           .in("id", allServiceIds)
           .eq("vendor_id", vendor!.id);
+        // Otherwise requested add-ons silently vanish from the request card.
+        if (servicesErr) throw servicesErr;
         for (const s of (services ?? []) as InboxVenueRequestService[]) {
           serviceById.set(s.id, s);
         }

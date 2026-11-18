@@ -4,7 +4,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { EmptyState } from "@/components/EmptyState";
+import { ErrorState, EmptyState } from "@/components/EmptyState";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -14,6 +14,7 @@ import {
   useUnblockDate,
 } from "@/hooks/useMyAvailability";
 import { useMyVenues } from "@/hooks/useMyVenues";
+import { parseDateOnly, todayDateOnly } from "@/lib/dates";
 
 /**
  * Availability — vendor holds unbookable dates so the marketplace hides them
@@ -35,7 +36,7 @@ export default function AvailabilityTab() {
     () => new Map(venues.map((v) => [v.id, v.name])),
     [venues],
   );
-  const { data: blocks = [], isLoading } = useMyAvailability();
+  const { data: blocks = [], isLoading, error, refetch } = useMyAvailability();
   const blockDate = useBlockDate();
   const unblockDate = useUnblockDate();
 
@@ -71,6 +72,7 @@ export default function AvailabilityTab() {
               <Input
                 id="block-date"
                 type="date"
+                min={todayDateOnly()}
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
               />
@@ -110,6 +112,8 @@ export default function AvailabilityTab() {
 
       {isLoading ? (
         <Skeleton className="h-16 w-full rounded-xl" />
+      ) : error ? (
+        <ErrorState message="Couldn't load your blocked dates." onRetry={refetch} />
       ) : blocks.length === 0 ? (
         <EmptyState message="No blocked dates. Organizers see you as fully available." />
       ) : (
@@ -125,7 +129,12 @@ export default function AvailabilityTab() {
                     <CalendarX className="h-4 w-4 text-muted-foreground" />
                     <div>
                       <div className="num font-medium text-foreground">
-                        {b.date}
+                        {parseDateOnly(b.date).toLocaleDateString(undefined, {
+                          weekday: "short",
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })}
                         <span className="ml-2 text-xs font-normal text-muted-foreground">
                           {b.venue_id ? venueNames.get(b.venue_id) ?? "One venue" : "All venues"}
                         </span>
@@ -140,10 +149,18 @@ export default function AvailabilityTab() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => unblockDate.mutate(b.id)}
+                      onClick={() =>
+                        unblockDate.mutate(b.id, {
+                          onSuccess: () => toast.success("Date released"),
+                          onError: (err: Error) =>
+                            toast.error(err?.message ?? "Could not release date"),
+                        })
+                      }
                       disabled={unblockDate.isPending}
+                      aria-label={`Release ${b.date}`}
+                      className="h-10 w-10 p-0"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </Button>
                   ) : null}
                 </li>

@@ -36,3 +36,7 @@ bun-debug.log*
 .cache
 .turbo
 .vite
+
+# PWA dev service worker / test coverage
+dev-dist
+coverage

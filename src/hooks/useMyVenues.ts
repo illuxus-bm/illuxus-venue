@@ -196,6 +196,9 @@ export function useDeleteVenue() {
     onSuccess: (_v, vars) => {
       qc.invalidateQueries({ queryKey: ["vendor-venues", vendor?.id] });
       qc.invalidateQueries({ queryKey: ["venue-media", vars.id] });
+      // venues ON DELETE CASCADE removes its services and calendar blocks.
+      qc.invalidateQueries({ queryKey: ["vendor-services", vendor?.id] });
+      qc.invalidateQueries({ queryKey: ["vendor-availability", vendor?.id] });
       toast.success(`Deleted "${vars.name}"`);
     },
     onError: (err) => toast.error(err.message ?? "Could not delete venue"),

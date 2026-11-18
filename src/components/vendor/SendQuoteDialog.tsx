@@ -22,20 +22,27 @@ import { useVendorAuth } from "@/contexts/VendorAuthContext";
 import { supabase } from "@/integrations/supabase/client";
 import { cn, formatMoneyCents } from "@/lib/utils";
 import type { InboxRfq } from "@/hooks/useInboxRfqs";
+import { addDays, toDateOnly, todayDateOnly } from "@/lib/dates";
 
 const CURRENCIES = ["USD", "INR", "EUR", "GBP", "AUD", "CAD", "SGD", "AED"] as const;
 
 const schema = z.object({
-  total: z.coerce.number().positive("Total must be greater than zero"),
+  total: z.coerce
+    .number({ error: "Enter a number" })
+    .positive("Total must be greater than zero")
+    .max(1_000_000_000, "That total looks too large"),
   currency: z.enum(CURRENCIES),
   valid_until: z
     .string()
-    .min(1, "Pick a date the quote is valid until"),
+    .min(1, "Pick a date the quote is valid until")
+    // "YYYY-MM-DD" strings compare correctly as text.
+    .refine((v) => v >= todayDateOnly(), "The validity date can't be in the past"),
   inclusions: z.string().max(1000).optional().or(z.literal("")),
   notes: z.string().max(1000).optional().or(z.literal("")),
 });
 
-type FormValues = z.infer<typeof schema>;
+type FormInput = z.input<typeof schema>;
+type FormValues = z.output<typeof schema>;
 
 interface SendQuoteDialogProps {
   open: boolean;
@@ -66,7 +73,7 @@ export function SendQuoteDialog({
     reset,
     watch,
     formState: { errors },
-  } = useForm<FormValues>({
+  } = useForm<FormInput, unknown, FormValues>({
     resolver: zodResolver(schema),
     defaultValues: buildDefaults(rfq, vendor?.default_currency),
   });
@@ -192,7 +199,7 @@ export function SendQuoteDialog({
 
           <div className="space-y-2">
             <Label htmlFor="valid_until">Valid until</Label>
-            <Input id="valid_until" type="date" {...register("valid_until")} />
+            <Input id="valid_until" type="date" min={todayDateOnly()} {...register("valid_until")} />
             {errors.valid_until ? (
               <p className="text-xs text-destructive">
                 {errors.valid_until.message}
@@ -215,7 +222,7 @@ export function SendQuoteDialog({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="notes">Notes (private)</Label>
+            <Label htmlFor="notes">Notes for the organizer</Label>
             <Textarea
               id="notes"
               rows={2}
@@ -251,12 +258,11 @@ function buildDefaults(
     vendorDefaultCurrency ??
     "USD") as (typeof CURRENCIES)[number];
   const validCurrency = CURRENCIES.includes(currency) ? currency : "USD";
-  const twoWeeksFromNow = new Date();
-  twoWeeksFromNow.setDate(twoWeeksFromNow.getDate() + 14);
+  const twoWeeksFromNow = addDays(new Date(), 14);
   return {
     total: 0,
     currency: validCurrency,
-    valid_until: twoWeeksFromNow.toISOString().slice(0, 10),
+    valid_until: toDateOnly(twoWeeksFromNow),
     inclusions: "",
     notes: "",
   };

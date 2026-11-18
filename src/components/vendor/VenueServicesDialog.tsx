@@ -56,7 +56,7 @@ export function VenueServicesDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-2xl flex flex-col p-0 gap-0 max-h-[85vh]">
+        <DialogContent className="sm:max-w-2xl flex flex-col p-0 gap-0 max-h-[85dvh]">
           <DialogHeader className="px-6 pt-6 pb-4 border-b border-border">
             <DialogTitle>Services · {venue.name}</DialogTitle>
             <DialogDescription>

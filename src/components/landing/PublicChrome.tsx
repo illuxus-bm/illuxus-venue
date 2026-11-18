@@ -32,7 +32,7 @@ export function PublicPage({ onLanding = false, children }: { onLanding?: boolea
       {/* Fixed drafting grid the page scrolls over, as on illuxus. */}
       <div aria-hidden="true" className="blueprint-grid pointer-events-none fixed inset-0 opacity-70" />
       <PublicHeader onLanding={onLanding} />
-      <main className="relative">{children}</main>
+      <main className="relative pt-safe">{children}</main>
       <PublicFooter />
     </div>
   );
@@ -53,7 +53,7 @@ function PublicHeader({ onLanding }: { onLanding: boolean }) {
   }, []);
 
   return (
-    <header ref={ref} className="landing-header fixed inset-x-0 top-0 z-40">
+    <header ref={ref} className="landing-header fixed inset-x-0 top-0 z-40 pt-safe">
       <SiteContainer className="relative flex h-16 items-center justify-between gap-3 lg:h-[4.5rem]">
         <Link to="/" className="flex items-center gap-2.5" aria-label="Illuxus Venues home">
           <IlluxusWordmark height={22} ariaLabel="" />
@@ -102,7 +102,7 @@ function PublicHeader({ onLanding }: { onLanding: boolean }) {
 function PublicFooter() {
   const origin = illuxusOrigin().replace(/\/$/, "");
   return (
-    <footer className="relative border-t border-border bg-card/60">
+    <footer className="relative border-t border-border bg-card/60 pb-safe">
       <SiteContainer className="flex flex-col gap-6 py-10 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <IlluxusWordmark height={20} />

@@ -59,6 +59,7 @@ export type Database = {
           business_name: string;
         };
         Update: Partial<Database["public"]["Tables"]["vendors"]["Row"]>;
+        Relationships: [];
       };
       vendor_members: {
         Row: {
@@ -74,9 +75,10 @@ export type Database = {
           role?: VendorMemberRole;
         };
         Update: Partial<Database["public"]["Tables"]["vendor_members"]["Row"]>;
+        Relationships: [];
       };
     };
-    Views: Record<string, never>;
+    Views: { [_ in never]: never };
     Functions: {
       create_vendor_business: {
         Args: { p_business_name: string };
@@ -100,7 +102,7 @@ export type Database = {
         Returns: string;
       };
     };
-    Enums: Record<string, never>;
-    CompositeTypes: Record<string, never>;
+    Enums: { [_ in never]: never };
+    CompositeTypes: { [_ in never]: never };
   };
 };

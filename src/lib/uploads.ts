@@ -37,9 +37,7 @@ export interface UploadErr {
 export type UploadResult = UploadOk | UploadErr;
 
 function extForFile(file: File): string {
-  const fromName = file.name.split(".").pop()?.toLowerCase();
-  if (fromName && /^[a-z0-9]{2,5}$/.test(fromName)) return fromName;
-  // Fall back on the MIME type.
+  // Derive from the validated MIME type only; a file name can claim anything.
   if (file.type === "image/jpeg") return "jpg";
   if (file.type === "image/png") return "png";
   if (file.type === "image/webp") return "webp";
@@ -111,7 +109,6 @@ export async function removeVendorObject(path: string): Promise<void> {
     .remove([path]);
   if (error) {
     // Non-fatal — old files just linger.
-    // eslint-disable-next-line no-console
     console.warn("vendor-media cleanup failed", { path, error });
   }
 }

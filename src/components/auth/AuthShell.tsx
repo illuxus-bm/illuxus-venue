@@ -17,7 +17,7 @@ interface AuthShellProps {
 export function AuthShell({ children, footer }: AuthShellProps) {
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      <header className="border-b border-border/60">
+      <header className="border-b border-border/60 pt-safe">
         <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between px-6">
           <Link to="/" className="flex items-center gap-2.5" aria-label="Illuxus Venues home">
             <IlluxusWordmark height={20} ariaLabel="" />

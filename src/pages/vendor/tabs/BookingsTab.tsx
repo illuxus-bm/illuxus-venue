@@ -20,7 +20,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { EmptyState } from "@/components/EmptyState";
+import { ErrorState, EmptyState } from "@/components/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
@@ -32,6 +32,7 @@ import {
 import { VenueBriefSummary } from "@/components/vendor/VenueBriefSummary";
 import { formatMoneyCents } from "@/lib/utils";
 import { Building2, ListChecks, MapPin, Users } from "lucide-react";
+import { parseDateOnly } from "@/lib/dates";
 
 const FILTERS: { value: MyBooking["status"] | "all"; label: string }[] = [
   { value: "all", label: "All" },
@@ -53,7 +54,7 @@ export default function BookingsTab() {
   const [filter, setFilter] = React.useState<(typeof FILTERS)[number]["value"]>(
     "all",
   );
-  const { data: bookings = [], isLoading, error } = useMyBookings();
+  const { data: bookings = [], isLoading, error, refetch } = useMyBookings();
   // Venue bookings live in a separate table (event_venue_selections) with a
   // different lifecycle to vendor_bookings — there's no pending / quoted
   // negotiation step, and the vendor already accepted or declined via the
@@ -77,7 +78,7 @@ export default function BookingsTab() {
     );
   }
   if (error) {
-    return <EmptyState message="Couldn't load your bookings." />;
+    return <ErrorState message="Couldn't load your bookings." onRetry={refetch} />;
   }
 
   const filtered = bookings.filter(
@@ -96,11 +97,13 @@ export default function BookingsTab() {
         {FILTERS.map((f) => (
           <button
             key={f.value}
+            type="button"
+            aria-pressed={filter === f.value}
             onClick={() => setFilter(f.value)}
             className={
               filter === f.value
-                ? "rounded-full bg-foreground px-3 py-1 text-xs font-medium text-background"
-                : "rounded-full border border-border/70 px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                ? "min-h-9 rounded-full bg-foreground px-3 py-1.5 text-xs font-medium text-background"
+                : "min-h-9 rounded-full border border-border/70 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
             }
           >
             {f.label}
@@ -206,7 +209,7 @@ function VenueBookingRow({ request }: { request: InboxVenueRequest }) {
               </span>
             ) : null}
             {request.event_date ? (
-              <span>{new Date(request.event_date).toLocaleDateString()}</span>
+              <span>{parseDateOnly(request.event_date).toLocaleDateString()}</span>
             ) : null}
             {request.event_capacity ? (
               <span className="inline-flex items-center gap-1">

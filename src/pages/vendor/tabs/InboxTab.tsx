@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { EmptyState } from "@/components/EmptyState";
+import { ErrorState, EmptyState } from "@/components/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SendQuoteDialog } from "@/components/vendor/SendQuoteDialog";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
@@ -55,7 +55,12 @@ export default function InboxTab() {
 
   if (isLoading) return <ListSkeleton />;
   if (error) {
-    return <EmptyState message="Couldn't load your inbox. Try again in a moment." />;
+    return (
+      <ErrorState
+        message="Couldn't load your inbox."
+        onRetry={() => Promise.all([rfqQ.refetch(), venueQ.refetch()])}
+      />
+    );
   }
 
   const items: InboxItem[] = [
@@ -79,15 +84,17 @@ export default function InboxTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         {FILTERS.map((f) => (
           <button
             key={f.value}
+            type="button"
+            aria-pressed={filter === f.value}
             onClick={() => setFilter(f.value)}
             className={
               filter === f.value
-                ? "rounded-full bg-foreground px-3 py-1 text-xs font-medium text-background"
-                : "rounded-full border border-border/70 px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground"
+                ? "min-h-9 rounded-full bg-foreground px-3 py-1.5 text-xs font-medium text-background"
+                : "min-h-9 rounded-full border border-border/70 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground"
             }
           >
             {f.label}

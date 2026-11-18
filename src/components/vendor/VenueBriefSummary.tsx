@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import type { InboxVenueRequest } from "@/hooks/useInboxVenueRequests";
+import { safeHttpUrl } from "@/lib/safeUrl";
 
 /**
  * Compact table of the venue-booking brief the organizer captured on
@@ -59,9 +60,9 @@ export function VenueBriefSummary({ request }: { request: InboxVenueRequest }) {
         </div>
       )}
 
-      {request.venue_link && (
+      {safeHttpUrl(request.venue_link) && (
         <a
-          href={request.venue_link}
+          href={safeHttpUrl(request.venue_link)!}
           target="_blank"
           rel="noreferrer noopener"
           className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline break-all"

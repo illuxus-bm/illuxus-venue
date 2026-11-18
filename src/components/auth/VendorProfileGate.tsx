@@ -1,5 +1,6 @@
+import * as React from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, WifiOff } from "lucide-react";
 
 import { AuthShell } from "@/components/auth/AuthShell";
 import { Button } from "@/components/ui/button";
@@ -18,15 +19,56 @@ import { useVendorAuth } from "@/contexts/VendorAuthContext";
  * business or sign out.
  */
 export function VendorProfileGate({ children }: { children: React.ReactNode }) {
-  const { loading, vendorLoading, user, vendor, signOut } = useVendorAuth();
+  const { loading, vendorLoading, user, vendor, vendorError, signOut, refreshVendor } =
+    useVendorAuth();
   const navigate = useNavigate();
+  const [retrying, setRetrying] = React.useState(false);
+
+  // Once a vendor is loaded, keep the dashboard mounted through background
+  // reloads; otherwise tab state and open dialogs would be thrown away.
+  if (vendor) return <>{children}</>;
 
   if (loading || vendorLoading) return <FullPageLoader />;
 
   // Belt-and-suspenders: RequireVendorAuth handles this too.
   if (!user) return <Navigate to="/vendor/login" replace />;
 
-  if (vendor) return <>{children}</>;
+  if (vendorError) {
+    return (
+      <AuthShell>
+        <div className="space-y-3 text-center" role="alert">
+          <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-destructive/10 text-destructive">
+            <WifiOff className="h-5 w-5" aria-hidden="true" />
+          </div>
+          <h1 className="text-xl font-semibold tracking-tight">
+            Couldn't load your business
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Check your connection and try again.
+          </p>
+        </div>
+        <div className="mt-8 space-y-2">
+          <Button
+            className="w-full"
+            disabled={retrying}
+            onClick={async () => {
+              setRetrying(true);
+              try {
+                await refreshVendor();
+              } finally {
+                setRetrying(false);
+              }
+            }}
+          >
+            {retrying ? "Retrying…" : "Try again"}
+          </Button>
+          <Button variant="outline" className="w-full" onClick={() => void signOut()}>
+            Sign out
+          </Button>
+        </div>
+      </AuthShell>
+    );
+  }
 
   const handleSignOut = async () => {
     await signOut();

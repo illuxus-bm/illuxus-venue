@@ -1,0 +1,4 @@
+# Public venue and business pages are indexable; the vendor portal is not.
+User-agent: *
+Allow: /
+Disallow: /vendor

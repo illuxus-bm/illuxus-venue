@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Building2,
   CalendarCheck,
@@ -53,7 +54,27 @@ type TabValue = (typeof TABS)[number]["value"];
  * we can lift it into the URL via `useSearchParams`.
  */
 export default function VendorDashboardPage() {
-  const [active, setActive] = React.useState<TabValue>("overview");
+  // Active tab lives in ?tab= so reloads, back/forward and shared links keep
+  // the vendor where they were.
+  const [params, setParams] = useSearchParams();
+  const requested = params.get("tab");
+  const active: TabValue = TABS.some((t) => t.value === requested)
+    ? (requested as TabValue)
+    : "overview";
+  const setActive = React.useCallback(
+    (tab: string) => {
+      setParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (tab === "overview") next.delete("tab");
+          else next.set("tab", tab);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setParams],
+  );
   useVendorRealtime();
 
   return (
@@ -65,12 +86,13 @@ export default function VendorDashboardPage() {
         <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
           <Tabs
             value={active}
-            onValueChange={(v) => setActive(v as TabValue)}
+            onValueChange={setActive}
             className="w-full"
           >
             {/* Tab rail — centered pill row on a light background. */}
-            <div className="flex justify-center">
-              <TabsList className="flex h-auto flex-wrap gap-1 bg-secondary p-1">
+            {/* Phones: one swipeable row. Larger screens: centred, wrapping. */}
+            <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:flex sm:justify-center sm:overflow-visible sm:px-0 [&::-webkit-scrollbar]:hidden">
+              <TabsList className="inline-flex h-auto w-max gap-1 bg-secondary p-1 sm:w-auto sm:flex-wrap sm:justify-center">
                 {TABS.map((t) => {
                   const Icon = t.icon;
                   return (
@@ -90,7 +112,7 @@ export default function VendorDashboardPage() {
                   {/* Overview is the only tab that needs to redirect to
                       another tab (via the "Complete profile" CTA). Passing
                       an unrecognized prop to the others is harmless. */}
-                  <Component onSwitchTab={setActive as (tab: string) => void} />
+                  <Component onSwitchTab={setActive} />
                 </TabsContent>
               );
             })}

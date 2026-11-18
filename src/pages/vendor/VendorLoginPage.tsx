@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useVendorAuth } from "@/contexts/VendorAuthContext";
+import { safeInternalPath } from "@/lib/safeUrl";
 
 const schema = z.object({
   email: z.string().email("Enter a valid email"),
@@ -22,9 +23,7 @@ type FormValues = z.infer<typeof schema>;
 /** Guards `?next=` to same-origin paths so a crafted `?next=//evil.com`
  *  can't turn our login into an open redirect. */
 function safeNext(candidate: string | null): string {
-  if (!candidate) return "/vendor";
-  if (!candidate.startsWith("/") || candidate.startsWith("//")) return "/vendor";
-  return candidate;
+  return safeInternalPath(candidate, "/vendor");
 }
 
 function isNotAVendorError(message: string): boolean {
