@@ -66,6 +66,62 @@ jobs:
       - uses: actions/checkout@v5
       - run: bash supabase/tests/run.sh ci_migrations
 
+  api:
+    name: API · integration tests (${{ matrix.flavor }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # aws: fresh DB from `prisma migrate deploy` + self-hosted auth
+        # supabase: Supabase-shaped DB (SQL migrations, RLS, triggers) baselined for Prisma + Supabase JWTs
+        flavor: [aws, supabase]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      TEST_DB_FLAVOR: ${{ matrix.flavor }}
+      TEST_PG_URL: postgresql://postgres@localhost:5432
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: Migrations match the Prisma schema (no drift)
+        if: matrix.flavor == 'aws'
+        run: |
+          psql -h localhost -U postgres -c "create database drift_check"
+          DIRECT_URL=postgresql://postgres@localhost:5432/drift_check npx prisma migrate deploy
+          DIRECT_URL=postgresql://postgres@localhost:5432/drift_check npx prisma migrate diff \
+            --from-config-datasource --to-schema server/prisma/schema.prisma --exit-code
+      - run: npm run test:api
+
+  api-image:
+    name: API · Docker image
+    needs: api
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker build -t illuxus-venues-api:${{ github.sha }} .
+      - name: Boots, refuses bad config, answers health
+        run: |
+          ! docker run --rm illuxus-venues-api:${{ github.sha }}
+          docker run -d --name api -p 8787:8787 -e DATABASE_URL=postgresql://none@127.0.0.1:1/none \
+            -e AUTH_PROVIDER=local -e JWT_SECRET=ci-only-0123456789abcdef0123456789abcdef \
+            illuxus-venues-api:${{ github.sha }}
+          for i in $(seq 1 20); do curl -fs localhost:8787/api/health && break; sleep 1; done
+          test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8787/api/ready)" = "503"
+          docker stop api
+
   android:
     name: Android · debug APK + lint
     needs: web

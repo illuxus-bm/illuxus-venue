@@ -5,7 +5,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist", "dev-dist", "coverage", "node_modules", "android", "ios"] },
+  { ignores: ["dist", "dev-dist", "coverage", "node_modules", "android", "ios", "server/dist", "server/src/generated"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],
@@ -35,5 +35,11 @@ export default tseslint.config(
     // components by design; Fast Refresh falls back to a full reload there.
     files: ["src/components/ui/**/*.{ts,tsx}", "src/contexts/**/*.{ts,tsx}"],
     rules: { "react-refresh/only-export-components": "off" },
+  },
+  {
+    // API server: Node globals, no React rules.
+    files: ["server/**/*.ts", "api/**/*.ts", "prisma.config.ts"],
+    languageOptions: { globals: globals.node },
+    rules: { "react-refresh/only-export-components": "off", "react-hooks/rules-of-hooks": "off" },
   },
 );

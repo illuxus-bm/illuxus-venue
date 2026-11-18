@@ -40,3 +40,7 @@ bun-debug.log*
 # PWA dev service worker / test coverage
 dev-dist
 coverage
+
+# Prisma client (generated on install) and API build output
+server/src/generated
+server/dist

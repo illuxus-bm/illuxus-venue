@@ -1,0 +1,66 @@
+# Local full stack: Postgres + MinIO (S3) + the API in self-hosted-auth mode,
+# i.e. the same shape as an AWS deployment (RDS + S3 + ECS).
+#   docker compose up --build
+#   docker compose run --rm migrate
+#   docker compose run --rm api npm run user:create -- --email you@x.com --business "My Venues"
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: illuxus
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address :9001
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio-secret
+    ports: ["9000:9000", "9001:9001"]
+    volumes: [miniodata:/data]
+
+  buckets:
+    image: minio/mc:latest
+    depends_on: [minio]
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minio minio-secret; do sleep 1; done;
+      mc mb -p local/venue-media local/vendor-media;
+      mc anonymous set download local/venue-media;
+      mc anonymous set download local/vendor-media;
+      "
+
+  migrate:
+    build: .
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DIRECT_URL: postgresql://postgres:postgres@db:5432/illuxus
+    command: ["npx", "prisma", "migrate", "deploy"]
+
+  api:
+    build: .
+    depends_on:
+      db: { condition: service_healthy }
+    ports: ["8787:8787"]
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/illuxus
+      AUTH_PROVIDER: local
+      JWT_SECRET: dev-only-change-me-0123456789abcdef0123456789
+      CORS_ORIGINS: http://localhost:8081
+      STORAGE_ENDPOINT: http://localhost:9000
+      STORAGE_FORCE_PATH_STYLE: "true"
+      STORAGE_ACCESS_KEY_ID: minio
+      STORAGE_SECRET_ACCESS_KEY: minio-secret
+      STORAGE_PUBLIC_BASE_URL: http://localhost:9000
+      LOG_LEVEL: info
+
+volumes:
+  pgdata:
+  miniodata:

@@ -17,9 +17,12 @@ export default defineConfig(({ mode }) => {
     server: {
       host: "::",
       port: 8081,
+      // Same-origin /api in dev, like production (Vercel function / proxy).
+      proxy: { "/api": { target: process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8787", changeOrigin: true } },
     },
     preview: {
       port: 8081,
+      proxy: { "/api": { target: process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8787", changeOrigin: true } },
     },
     plugins: [
       react(),
@@ -94,7 +97,6 @@ export default defineConfig(({ mode }) => {
           codeSplitting: {
             groups: [
               { name: "react", test: /node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/ },
-              { name: "supabase", test: /node_modules[\\/]@supabase[\\/]/ },
               { name: "radix", test: /node_modules[\\/]@radix-ui[\\/]/ },
               { name: "query", test: /node_modules[\\/]@tanstack[\\/]/ },
               { name: "forms", test: /node_modules[\\/](zod|react-hook-form|@hookform)[\\/]/ },

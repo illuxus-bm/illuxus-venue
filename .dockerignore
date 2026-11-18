@@ -1,0 +1,14 @@
+node_modules
+dist
+dev-dist
+server/dist
+server/src/generated
+android
+ios
+coverage
+.git
+.github
+.env
+.env.*
+!.env.example
+**/*.log
