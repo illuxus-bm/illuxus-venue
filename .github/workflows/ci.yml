@@ -83,6 +83,10 @@ jobs:
           java-version: "21"
           cache: gradle
       - uses: android-actions/setup-android@v3
+        with:
+          # The action's default list includes the removed "tools" package,
+          # which makes current sdkmanager (cmdline-tools 16+) fail.
+          packages: "platform-tools platforms;android-36"
       - run: npm ci
       - run: npm run cap:sync
       - name: Build debug APK and run Android lint
@@ -125,6 +129,10 @@ jobs:
           java-version: "21"
           cache: gradle
       - uses: android-actions/setup-android@v3
+        with:
+          # The action's default list includes the removed "tools" package,
+          # which makes current sdkmanager (cmdline-tools 16+) fail.
+          packages: "platform-tools platforms;android-36"
       - name: Restore upload keystore
         run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$ANDROID_KEYSTORE_PATH"
       - run: npm ci
