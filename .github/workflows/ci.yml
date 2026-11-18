@@ -82,7 +82,7 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: gradle
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           # The action's default list includes the removed "tools" package,
           # which makes current sdkmanager (cmdline-tools 16+) fail.
@@ -128,7 +128,7 @@ jobs:
           distribution: temurin
           java-version: "21"
           cache: gradle
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
         with:
           # The action's default list includes the removed "tools" package,
           # which makes current sdkmanager (cmdline-tools 16+) fail.
