@@ -1,0 +1,601 @@
+// =============================================================================
+// Illuxus Venues: Prisma schema
+// =============================================================================
+// Introspected (`prisma db pull`) from a database built by applying
+// supabase/migrations/100-111 on top of the shared Illuxus base schema, so
+// table and column names map 1:1 onto the live Supabase tables.
+//
+// Portable between Supabase Postgres and AWS RDS / Aurora Postgres:
+//  * No cross-schema relations. Columns that point at users (user_id,
+//    reviewer_id, owner_id, created_by, sender_id) are plain UUIDs. On
+//    Supabase they hold auth.users ids; on AWS they hold app_users ids.
+//  * `updated_at` is maintained by Prisma (@updatedAt), not triggers.
+//  * Constraints Prisma can't express (expression indexes, CHECKs) live in
+//    raw SQL in migrations/1_portable_constraints.
+//
+// Before baselining against the real Supabase project, re-run
+// `npm run db:pull` there and diff: the base tables owned by the main app
+// were reconstructed from usage, not read from its migrations.
+// =============================================================================
+
+generator client {
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["partialIndexes"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model booking_milestones {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  booking_id      String          @db.Uuid
+  label           String
+  amount          BigInt          @default(0)
+  due_date        DateTime?       @db.Date
+  status          String          @default("pending")
+  sort_order      Int             @default(0)
+  completed_at    DateTime?       @db.Timestamptz(6)
+  created_at      DateTime        @default(now()) @db.Timestamptz(6)
+  vendor_bookings vendor_bookings @relation(fields: [booking_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model event_venue_selections {
+  id                       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  event_id                 String    @db.Uuid
+  vendor_id                String    @db.Uuid
+  venue_id                 String?   @db.Uuid
+  status                   String    @default("contacted")
+  notes                    String?
+  selected_service_ids     String[]  @default([]) @db.Uuid
+  event_type               String?
+  event_duration_hours     Decimal?  @db.Decimal(5, 1)
+  expected_attendees       Int?
+  seating_capacity         Int?
+  seating_arrangement      String?
+  needs_pre_function_area  Boolean   @default(false)
+  needs_vip_area           Boolean   @default(false)
+  needs_additional_rooms   Boolean   @default(false)
+  venue_link               String?
+  responded_at             DateTime? @db.Timestamptz(6)
+  created_at               DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+  response_notified_status String?
+  events                   events    @relation(fields: [event_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vendors                  vendors   @relation(fields: [vendor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([event_id])
+  @@index([vendor_id])
+  @@index([vendor_id], map: "event_venue_selections_vendor_idx")
+  @@index([venue_id, status], map: "event_venue_selections_venue_status_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model events {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                 String?                  @db.Uuid
+  user_id                String?                  @db.Uuid
+  title                  String
+  description            String?
+  date                   DateTime?                @db.Timestamptz(6)
+  end_date               DateTime?                @db.Timestamptz(6)
+  timezone               String?
+  location               String?
+  venue                  String?
+  capacity               Int?
+  event_format           String?
+  status                 String                   @default("draft")
+  banner_landscape_url   String?
+  banner_portrait_url    String?
+  image_url              String?
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                 @default(now()) @updatedAt @db.Timestamptz(6)
+  event_venue_selections event_venue_selections[]
+  organizations          organizations?           @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  rfqs                   rfqs[]
+  vendor_bookings        vendor_bookings[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model org_members {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id        String        @db.Uuid
+  user_id       String        @db.Uuid
+  role          String        @default("member")
+  created_at    DateTime      @default(now()) @db.Timestamptz(6)
+  organizations organizations @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([org_id, user_id])
+}
+
+model organizations {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                   String
+  owner_id               String?                  @db.Uuid
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                 @default(now()) @updatedAt @db.Timestamptz(6)
+  events                 events[]
+  org_members            org_members[]
+  rfqs                   rfqs[]
+  vendor_bookings        vendor_bookings[]
+  vendor_message_threads vendor_message_threads[]
+}
+
+model profiles {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id             String   @unique @db.Uuid
+  display_name        String?
+  first_name          String?
+  last_name           String?
+  avatar_url          String?
+  mobile_country_code String?
+  mobile_number       String?
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model quote_line_items {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  quote_id    String   @db.Uuid
+  description String
+  quantity    Decimal  @default(1) @db.Decimal(10, 2)
+  unit_price  BigInt   @default(0)
+  amount      BigInt   @default(0)
+  sort_order  Int      @default(0)
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+  quotes      quotes   @relation(fields: [quote_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model quotes {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  rfq_id           String             @db.Uuid
+  vendor_id        String             @db.Uuid
+  total            BigInt
+  currency         String             @default("USD")
+  valid_until      DateTime?          @db.Date
+  inclusions       String?
+  notes            String?
+  status           String             @default("draft")
+  created_at       DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime           @default(now()) @updatedAt @db.Timestamptz(6)
+  quote_line_items quote_line_items[]
+  rfqs             rfqs               @relation(fields: [rfq_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vendors          vendors            @relation(fields: [vendor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vendor_bookings  vendor_bookings?
+
+  @@unique([rfq_id, vendor_id])
+  @@index([rfq_id], map: "quotes_rfq_idx")
+  @@index([vendor_id], map: "quotes_vendor_idx")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model rfq_invitees {
+  id           String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  rfq_id       String    @db.Uuid
+  vendor_id    String    @db.Uuid
+  invited_at   DateTime  @default(now()) @db.Timestamptz(6)
+  responded_at DateTime? @db.Timestamptz(6)
+  declined     Boolean   @default(false)
+  rfqs         rfqs      @relation(fields: [rfq_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vendors      vendors   @relation(fields: [vendor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([rfq_id, vendor_id])
+  @@index([rfq_id, vendor_id], map: "rfq_invitees_rfq_vendor_idx")
+  @@index([vendor_id], map: "rfq_invitees_vendor_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model rfqs {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id                 String                   @db.Uuid
+  event_id               String?                  @db.Uuid
+  category_id            String?                  @db.Uuid
+  created_by             String?                  @db.Uuid
+  requirements           String                   @default("")
+  event_city             String?
+  event_date             DateTime?                @db.Date
+  expected_guests        Int?
+  budget_min             BigInt?
+  budget_max             BigInt?
+  currency               String                   @default("USD")
+  status                 String                   @default("open")
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  quotes                 quotes[]
+  rfq_invitees           rfq_invitees[]
+  vendor_categories      vendor_categories?       @relation(fields: [category_id], references: [id], onUpdate: NoAction)
+  events                 events?                  @relation(fields: [event_id], references: [id], onUpdate: NoAction)
+  organizations          organizations            @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vendor_bookings        vendor_bookings[]
+  vendor_message_threads vendor_message_threads[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model vendor_availability {
+  id              String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vendor_id       String           @db.Uuid
+  date            DateTime         @db.Date
+  status          String           @default("held")
+  note            String?
+  booking_id      String?          @db.Uuid
+  created_at      DateTime         @default(now()) @db.Timestamptz(6)
+  venue_id        String?          @db.Uuid
+  vendor_bookings vendor_bookings? @relation(fields: [booking_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vendors         vendors          @relation(fields: [vendor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  venues          venues?          @relation(fields: [venue_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([booking_id], map: "vendor_availability_booking_idx")
+  @@index([venue_id], map: "vendor_availability_venue_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vendor_bookings {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  quote_id               String?                  @unique(map: "vendor_bookings_quote_id_uniq", where: raw("(quote_id IS NOT NULL)")) @db.Uuid
+  rfq_id                 String?                  @db.Uuid
+  org_id                 String                   @db.Uuid
+  vendor_id              String                   @db.Uuid
+  event_id               String?                  @db.Uuid
+  total                  BigInt                   @default(0)
+  currency               String                   @default("USD")
+  commission_rate        Decimal                  @default(10.00) @db.Decimal(5, 2)
+  commission_amount      BigInt                   @default(0)
+  event_date             DateTime?                @db.Date
+  status                 String                   @default("pending")
+  deposit_status         String                   @default("pending")
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                 @default(now()) @updatedAt @db.Timestamptz(6)
+  booking_milestones     booking_milestones[]
+  vendor_availability    vendor_availability[]
+  events                 events?                  @relation(fields: [event_id], references: [id], onUpdate: NoAction)
+  organizations          organizations            @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  quotes                 quotes?                  @relation(fields: [quote_id], references: [id], onUpdate: NoAction)
+  rfqs                   rfqs?                    @relation(fields: [rfq_id], references: [id], onUpdate: NoAction)
+  vendors                vendors                  @relation(fields: [vendor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vendor_message_threads vendor_message_threads[]
+  vendor_reviews         vendor_reviews[]
+
+  @@index([org_id], map: "vendor_bookings_org_idx")
+  @@index([vendor_id], map: "vendor_bookings_vendor_idx")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vendor_categories {
+  id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  slug                String                @unique
+  name                String
+  icon                String?
+  sort_order          Int                   @default(0)
+  created_at          DateTime              @default(now()) @db.Timestamptz(6)
+  rfqs                rfqs[]
+  vendor_category_map vendor_category_map[]
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vendor_category_map {
+  vendor_id         String            @db.Uuid
+  category_id       String            @db.Uuid
+  created_at        DateTime          @default(now()) @db.Timestamptz(6)
+  vendor_categories vendor_categories @relation(fields: [category_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vendors           vendors           @relation(fields: [vendor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@id([vendor_id, category_id])
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vendor_email_allowlist {
+  email      String   @id
+  notes      String?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vendor_email_otps {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email       String
+  code_hash   String
+  purpose     String
+  attempts    Int       @default(0)
+  expires_at  DateTime  @db.Timestamptz(6)
+  consumed_at DateTime? @db.Timestamptz(6)
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@index([expires_at], map: "idx_vendor_email_otps_expires", where: raw("(consumed_at IS NULL)"))
+  @@index([email, purpose, created_at(sort: Desc)], map: "idx_vendor_email_otps_lookup", where: raw("(consumed_at IS NULL)"))
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vendor_members {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vendor_id  String   @db.Uuid
+  user_id    String   @unique(map: "vendor_members_user_id_uniq") @db.Uuid
+  role       String   @default("staff")
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  vendors    vendors  @relation(fields: [vendor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([vendor_id, user_id])
+  @@index([user_id, vendor_id], map: "vendor_members_user_vendor_idx")
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vendor_message_threads {
+  id              String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  org_id          String            @db.Uuid
+  vendor_id       String            @db.Uuid
+  rfq_id          String?           @db.Uuid
+  booking_id      String?           @db.Uuid
+  last_message_at DateTime?         @db.Timestamptz(6)
+  created_at      DateTime          @default(now()) @db.Timestamptz(6)
+  vendor_bookings vendor_bookings?  @relation(fields: [booking_id], references: [id], onUpdate: NoAction)
+  organizations   organizations     @relation(fields: [org_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  rfqs            rfqs?             @relation(fields: [rfq_id], references: [id], onUpdate: NoAction)
+  vendors         vendors           @relation(fields: [vendor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  vendor_messages vendor_messages[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vendor_messages {
+  id                     String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  thread_id              String                 @db.Uuid
+  sender_id              String                 @db.Uuid
+  sender_type            String                 @default("vendor")
+  body                   String
+  attachments            Json                   @default("[]")
+  read_at                DateTime?              @db.Timestamptz(6)
+  created_at             DateTime               @default(now()) @db.Timestamptz(6)
+  vendor_message_threads vendor_message_threads @relation(fields: [thread_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vendor_portfolio {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vendor_id  String   @db.Uuid
+  url        String
+  media_type String   @default("image")
+  caption    String?
+  is_cover   Boolean  @default(false)
+  sort_order Int      @default(0)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  vendors    vendors  @relation(fields: [vendor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([vendor_id], map: "vendor_portfolio_vendor_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vendor_reviews {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  booking_id      String          @db.Uuid
+  reviewer_id     String          @db.Uuid
+  reviewer_type   String
+  rating          Int             @db.SmallInt
+  comment         String?
+  created_at      DateTime        @default(now()) @db.Timestamptz(6)
+  vendor_bookings vendor_bookings @relation(fields: [booking_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([booking_id, reviewer_type])
+  @@unique([booking_id, reviewer_type], map: "vendor_reviews_booking_reviewer_uniq")
+  @@index([booking_id], map: "vendor_reviews_booking_idx")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vendor_service_addons {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  service_id      String          @db.Uuid
+  title           String
+  description     String?
+  price           BigInt          @default(0)
+  created_at      DateTime        @default(now()) @db.Timestamptz(6)
+  vendor_services vendor_services @relation(fields: [service_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vendor_service_areas {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vendor_id  String   @db.Uuid
+  city       String
+  country    String?
+  radius_km  Int?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  vendors    vendors  @relation(fields: [vendor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([vendor_id, city])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vendor_services {
+  id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vendor_id             String                  @db.Uuid
+  title                 String
+  description           String?
+  base_price            BigInt                  @default(0)
+  currency              String                  @default("USD")
+  unit                  String                  @default("per_event")
+  duration              String?
+  is_instant_book       Boolean                 @default(false)
+  quote_on_request      Boolean                 @default(false)
+  is_active             Boolean                 @default(true)
+  sort_order            Int                     @default(0)
+  created_at            DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime                @default(now()) @updatedAt @db.Timestamptz(6)
+  venue_id              String?                 @db.Uuid
+  category              String?
+  vendor_service_addons vendor_service_addons[]
+  vendors               vendors                 @relation(fields: [vendor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  venues                venues?                 @relation(fields: [venue_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([vendor_id], map: "vendor_services_vendor_idx")
+  @@index([venue_id])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model vendors {
+  id                     String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  business_name          String
+  tagline                String?
+  bio                    String?
+  website                String?
+  city                   String?
+  country                String?
+  logo_url               String?
+  cover_url              String?
+  years_experience       Int?
+  response_time_hours    Int?
+  socials                Json?                    @default("{}")
+  notify_email           Boolean                  @default(true)
+  auto_reply             String?
+  default_currency       String                   @default("USD")
+  rating_avg             Decimal?                 @default(0) @db.Decimal(3, 2)
+  rating_count           Int                      @default(0)
+  verification_status    String                   @default("unverified")
+  commission_rate        Decimal                  @default(10.00) @db.Decimal(5, 2)
+  created_at             DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime                 @default(now()) @updatedAt @db.Timestamptz(6)
+  event_venue_selections event_venue_selections[]
+  quotes                 quotes[]
+  rfq_invitees           rfq_invitees[]
+  vendor_availability    vendor_availability[]
+  vendor_bookings        vendor_bookings[]
+  vendor_category_map    vendor_category_map[]
+  vendor_members         vendor_members[]
+  vendor_message_threads vendor_message_threads[]
+  vendor_portfolio       vendor_portfolio[]
+  vendor_service_areas   vendor_service_areas[]
+  vendor_services        vendor_services[]
+  venues                 venues[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model venue_media {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  venue_id   String   @db.Uuid
+  url        String
+  caption    String?
+  media_kind String   @default("empty_hall")
+  is_cover   Boolean  @default(false)
+  sort_order Int      @default(0)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  venues     venues   @relation(fields: [venue_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([venue_id])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+/// This model contains an expression index which requires additional setup for migrations. Visit https://pris.ly/d/expression-indexes for more info.
+model venues {
+  id                           String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  vendor_id                    String                @db.Uuid
+  name                         String
+  space_type                   String?
+  description                  String?
+  is_active                    Boolean               @default(true)
+  area_sqft                    Int?
+  length_ft                    Decimal?              @db.Decimal(6, 1)
+  width_ft                     Decimal?              @db.Decimal(6, 1)
+  ceiling_height_ft            Decimal?              @db.Decimal(4, 1)
+  capacity_floating            Int?
+  capacity_theater             Int?
+  capacity_banquet             Int?
+  capacity_ushape              Int?
+  capacity_classroom           Int?
+  climate_control              String?
+  has_stage                    Boolean               @default(false)
+  stage_dimensions             String?
+  green_rooms_count            Int?
+  has_projector                Boolean               @default(false)
+  has_screen                   Boolean               @default(false)
+  has_sound_system             Boolean               @default(false)
+  has_microphones              Boolean               @default(false)
+  has_power_backup             Boolean               @default(false)
+  has_wifi                     Boolean               @default(false)
+  catering_policy              String?
+  decor_policy                 String?
+  alcohol_policy               String?
+  music_curfew_time            DateTime?             @db.Time(6)
+  noise_restrictions           String?
+  parking_car_capacity         Int?
+  parking_two_wheeler_capacity Int?
+  has_valet                    Boolean               @default(false)
+  wheelchair_accessible        Boolean               @default(false)
+  has_elevator                 Boolean               @default(false)
+  created_at                   DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at                   DateTime              @default(now()) @updatedAt @db.Timestamptz(6)
+  address_line                 String?
+  city                         String?
+  state                        String?
+  pincode                      String?
+  map_url                      String?
+  vendor_availability          vendor_availability[]
+  vendor_services              vendor_services[]
+  venue_media                  venue_media[]
+  vendors                      vendors               @relation(fields: [vendor_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([is_active])
+  @@index([vendor_id])
+}
+
+// -----------------------------------------------------------------------------
+// Self-hosted auth (AUTH_PROVIDER=local, e.g. on AWS). Unused with Supabase
+// Auth, whose users live in auth.users.
+// -----------------------------------------------------------------------------
+
+/// Portal users when the API owns authentication. Invite-only: created with
+/// `npm run user:create`, never by public sign-up.
+model app_users {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email             String          @unique
+  password_hash     String
+  display_name      String?
+  email_verified_at DateTime?       @db.Timestamptz(6)
+  disabled_at       DateTime?       @db.Timestamptz(6)
+  failed_logins     Int             @default(0)
+  locked_until      DateTime?       @db.Timestamptz(6)
+  last_login_at     DateTime?       @db.Timestamptz(6)
+  created_at        DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime        @default(now()) @updatedAt @db.Timestamptz(6)
+  auth_sessions     auth_sessions[]
+}
+
+/// Refresh-token sessions. Only a SHA-256 of the token is stored; tokens
+/// rotate on every refresh and reuse of a rotated token revokes the family.
+model auth_sessions {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String    @db.Uuid
+  family_id   String    @db.Uuid
+  token_hash  String    @unique
+  user_agent  String?
+  ip          String?
+  expires_at  DateTime  @db.Timestamptz(6)
+  revoked_at  DateTime? @db.Timestamptz(6)
+  replaced_by String?   @db.Uuid
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  app_users   app_users @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([family_id])
+}
